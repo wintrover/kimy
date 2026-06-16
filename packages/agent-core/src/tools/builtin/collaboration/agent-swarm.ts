@@ -52,6 +52,31 @@ export const AgentSwarmToolInputSchema = z
       .describe(
         'Map of existing subagent agent_id to the prompt used to resume that subagent. These resumed subagents are launched before new item-based subagents.',
       ),
+    partition_strategy: z
+      .enum(['none', 'ast-z3'])
+      .optional()
+      .describe(
+        'Partitioning strategy. "ast-z3" uses AST analysis + Z3 solver to auto-distribute files. "none" (default) uses manual items.',
+      ),
+    partition_files: z
+      .array(z.object({ path: z.string(), content: z.string() }))
+      .optional()
+      .describe(
+        'Source files for ast-z3 partitioning. Ignored unless partition_strategy is "ast-z3".',
+      ),
+    partition_agents: z
+      .number()
+      .int()
+      .min(2)
+      .max(128)
+      .optional()
+      .describe('Number of agents for ast-z3 partitioning.'),
+    isolate_workspaces: z
+      .boolean()
+      .optional()
+      .describe(
+        'When true with partition_strategy "ast-z3", each agent gets an isolated git worktree on its own branch. Prevents race conditions when agents modify files concurrently. After all agents complete, branches are merged in deterministic topological order based on the dependency graph.',
+      ),
   })
   .strict();
 
@@ -114,7 +139,119 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
   ): Promise<ExecutableToolResult> {
     try {
       this.swarmMode.enter('tool');
+
+      // If partition_strategy is 'ast-z3', auto-generate items from partitioner
+      if (args.partition_strategy === 'ast-z3' && args.partition_files?.length && args.partition_agents) {
+        try {
+          const { partitionFiles } = await import('../../../partitioner/index.js');
+          const { analyzeSourceFiles } = await import('../../../partitioner/ast-analyzer.js');
+          const { computeIODegrees, buildUndirectedEdges } = await import('../../../partitioner/dependency-graph.js');
+
+          const analyses = await analyzeSourceFiles(
+            args.partition_files.map(f => ({ path: f.path, content: f.content }))
+          );
+          // Update ioDegree in metrics
+          const degrees = computeIODegrees(analyses);
+          for (let i = 0; i < analyses.length; i++) {
+            analyses[i]!.metrics.ioDegree = degrees[i]!;
+          }
+
+          const result = await partitionFiles(analyses, args.partition_agents!);
+
+          // --- Workspace isolation (Race Condition Blocking) ---
+          let isolationResult: import('../../../partitioner/workspace-isolation.js').WorkspaceIsolationResult | undefined;
+          if (args.isolate_workspaces) {
+            const { createIsolatedWorkspaces } = await import('../../../partitioner/workspace-isolation.js');
+            const filePaths = analyses.map(a => a.filePath);
+            const imports = new Map<string, Set<string>>();
+            for (const a of analyses) {
+              imports.set(a.filePath, new Set(a.imports));
+            }
+            const edges = buildUndirectedEdges(imports, filePaths);
+
+            const sessionId = `swarm-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+            const { execFile: execFileCb } = await import('node:child_process');
+            const { promisify } = await import('node:util');
+            const execFileAsync = promisify(execFileCb);
+            const { stdout: repoRoot } = await execFileAsync('git', ['rev-parse', '--show-toplevel']);
+
+            isolationResult = await createIsolatedWorkspaces({
+              repoRoot: repoRoot.trim(),
+              sessionId,
+              agentCount: args.partition_agents!,
+              partition: result,
+              edges,
+              filePaths,
+            });
+          }
+
+          // Generate items from partition groups
+          const groups: string[][] = Array.from({ length: args.partition_agents! }, () => []);
+          for (let j = 0; j < result.assignment.length; j++) {
+            groups[result.assignment[j]!]!.push(analyses[j]!.filePath);
+          }
+          args.items = groups.map((group, i) => {
+            const base = `Agent ${i} files:\n${group.map(f => `- ${f}`).join('\n')}\nLoad: ${result.agentLoads[i]!.toFixed(1)}`;
+            // If isolated, inject worktree path into the item
+            if (isolationResult) {
+              const ws = isolationResult.workspaces[i]!;
+              return `${base}\nWORKTREE: ${ws.worktreePath}\nBRANCH: ${ws.branchName}\nIMPORTANT: You MUST cd to ${ws.worktreePath} before any file operations. All reads/writes must happen inside this worktree directory.`;
+            }
+            return base;
+          });
+          args.prompt_template = args.prompt_template ?? 'Process these files:\n{{item}}';
+
+          // Store isolation result for post-swarm merge
+          if (isolationResult) {
+            (args as Record<string, unknown>).__isolationResult = isolationResult;
+          }
+        } catch (err) {
+          // Partitioner failed — fall through to normal swarm
+          console.error('[WorkloadPartitioner] Failed:', err);
+        }
+      }
+
       const result = await this.runSwarm(args, context.signal, context.toolCallId);
+
+      // --- Post-swarm merge (deterministic rebase order) ---
+      const isolationResult = (args as Record<string, unknown>).__isolationResult as
+        | import('../../../partitioner/workspace-isolation.js').WorkspaceIsolationResult
+        | undefined;
+      if (isolationResult) {
+        const { mergeWorkspaces, cleanupWorkspaces } = await import('../../../partitioner/workspace-isolation.js');
+        const { buildUndirectedEdges } = await import('../../../partitioner/dependency-graph.js');
+        const { execFile: execFileCb } = await import('node:child_process');
+        const { promisify } = await import('node:util');
+        const execFileAsync = promisify(execFileCb);
+        const { stdout: repoRoot } = await execFileAsync('git', ['rev-parse', '--show-toplevel']);
+
+        // Reconstruct config for merge
+        const filePaths = (args.partition_files ?? []).map(f => f.path);
+        const mergeEdges: [number, number][] = []; // Edges not needed for merge, only order matters
+
+        const mergeConfig = {
+          repoRoot: repoRoot.trim(),
+          sessionId: isolationResult.workspaces[0]?.branchName.split('/').slice(0, -1).join('/') ?? '',
+          agentCount: args.partition_agents!,
+          partition: { assignment: [], agentLoads: [], T_max: 0, solver: 'z3' as const },
+          edges: mergeEdges,
+          filePaths,
+        };
+
+        try {
+          const mergeResult = await mergeWorkspaces(mergeConfig, isolationResult);
+          console.log(
+            `[WorkspaceIsolation] Merged ${String(mergeResult.mergedCount)}/${String(args.partition_agents)} branches. ` +
+            `Conflicts: ${String(mergeResult.conflicts.length)}. Final: ${mergeResult.finalCommit.slice(0, 8)}`
+          );
+        } catch (mergeErr) {
+          console.error('[WorkspaceIsolation] Merge failed:', mergeErr);
+        } finally {
+          // Always clean up worktrees
+          await cleanupWorkspaces(repoRoot.trim(), isolationResult);
+        }
+      }
+
       return {
         output: result,
       };
