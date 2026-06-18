@@ -424,6 +424,7 @@ async function configureFakeProvider(harness: KimiHarness): Promise<void> {
         provider: 'local',
         model: 'fake-model',
         maxContextSize: 262144,
+        capabilities: ['tool_use'],
       },
     },
     defaultModel: 'fake-model',

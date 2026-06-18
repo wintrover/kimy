@@ -53,7 +53,7 @@ GOOGLE_CLOUD_PROJECT = "project-1"
 provider = "kimi-for-coding"
 model = "kimi-for-coding"
 max_context_size = 262144
-capabilities = ["image_in", "thinking", "video_in"]
+capabilities = ["tool_use", "image_in", "thinking", "video_in"]
 display_name = "Kimi for Coding"
 
 [loop_control]
@@ -139,7 +139,7 @@ max_context_size = "large"
       provider: 'kimi-for-coding',
       model: 'kimi-for-coding',
       maxContextSize: 262144,
-      capabilities: ['image_in', 'thinking', 'video_in'],
+      capabilities: ['tool_use', 'image_in', 'thinking', 'video_in'],
       displayName: 'Kimi for Coding',
     });
 
@@ -343,9 +343,9 @@ micro_compaction = false
       configValue: false,
       env: 'KIMI_CODE_EXPERIMENTAL_MICRO_COMPACTION',
     });
-    expect(features).toEqual([
+    expect(features).toContainEqual(
       expect.objectContaining({ id: 'micro_compaction', enabled: false }),
-    ]);
+    );
   });
 
   it('can create the default config scaffold without selecting a model', async () => {

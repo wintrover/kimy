@@ -41,6 +41,7 @@ api_key = "sk-test"
 provider = "local"
 model = "${modelName}"
 max_context_size = 1000
+capabilities = ["tool_use"]
 `,
     'utf-8',
   );
@@ -315,6 +316,7 @@ api_key = "sk-test"
 provider = "local"
 model = "real-model"
 max_context_size = 1000
+capabilities = ["tool_use"]
 
 [thinking]
 effort = "medium"

@@ -107,12 +107,12 @@ describe('ReadTool', () => {
     expect(
       ReadInputSchema.safeParse({ path: '/tmp/test.txt', line_offset: 1, n_lines: 2 }).success,
     ).toBe(true);
-    expect(ReadInputSchema.safeParse({ path: '/tmp/test.txt', line_offset: 0 }).success).toBe(
-      false,
-    );
+    // line_offset: 0 and out-of-range negatives now pass Zod schema (flat integer)
+    // and are rejected at runtime in the execution() method instead.
+    expect(ReadInputSchema.safeParse({ path: '/tmp/test.txt', line_offset: 0 }).success).toBe(true);
     expect(
       ReadInputSchema.safeParse({ path: '/tmp/test.txt', line_offset: -(MAX_LINES + 1) }).success,
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('matches permission args with glob path semantics', () => {
@@ -186,6 +186,32 @@ describe('ReadTool', () => {
         '',
         'No lines read from file. Total lines in file: 2. End of file reached.',
       ),
+    });
+  });
+
+  it('rejects line_offset: 0 with a clear runtime error', async () => {
+    const tool = toolWithContent('a\nb\nc');
+
+    const result = await executeTool(tool, context({ path: '/tmp/a.txt', line_offset: 0 }));
+
+    expect(result).toEqual({
+      isError: true,
+      output: expect.stringContaining('Invalid line_offset: 0'),
+    });
+    expect(result).toEqual({
+      isError: true,
+      output: expect.stringContaining('Value 0 is strictly forbidden'),
+    });
+  });
+
+  it('rejects line_offset below -MAX_LINES with a clear runtime error', async () => {
+    const tool = toolWithContent('a\nb\nc');
+
+    const result = await executeTool(tool, context({ path: '/tmp/a.txt', line_offset: -(MAX_LINES + 1) }));
+
+    expect(result).toEqual({
+      isError: true,
+      output: expect.stringContaining(`Invalid line_offset: ${String(-(MAX_LINES + 1))}`),
     });
   });
 
@@ -743,14 +769,15 @@ describe('ReadTool', () => {
     }
   });
 
-  it('schema validation accepts -1 and -MAX_LINES but rejects -(MAX_LINES + 1)', () => {
+  it('schema validation accepts -1 and -MAX_LINES (runtime rejects -(MAX_LINES + 1))', () => {
     expect(ReadInputSchema.safeParse({ path: '/tmp/a.txt', line_offset: -1 }).success).toBe(true);
     expect(ReadInputSchema.safeParse({ path: '/tmp/a.txt', line_offset: -MAX_LINES }).success).toBe(
       true,
     );
+    // -(MAX_LINES + 1) now passes Zod schema (flat integer) but is rejected at runtime.
     expect(
       ReadInputSchema.safeParse({ path: '/tmp/a.txt', line_offset: -(MAX_LINES + 1) }).success,
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('reads non-sensitive dotfiles like .gitignore successfully', async () => {
@@ -856,5 +883,68 @@ describe('ReadTool description and schema parity', () => {
 
     expect(tool.description).toMatch(/UTF-?8/i);
     expect(tool.description).toMatch(/binary/i);
+  });
+});
+
+describe('ReadTool file_path alias normalization', () => {
+  it('accepts file_path and normalizes to path via safeParse', () => {
+    const result = ReadInputSchema.safeParse({ file_path: '/tmp/test.txt' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.path).toBe('/tmp/test.txt');
+    }
+  });
+
+  it('prefers path over file_path when both are provided', () => {
+    const result = ReadInputSchema.safeParse({
+      path: '/a.txt',
+      file_path: '/b.txt',
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.path).toBe('/a.txt');
+    }
+  });
+
+  it('rejects input when neither path nor file_path is provided', () => {
+    const result = ReadInputSchema.safeParse({});
+    expect(result.success).toBe(false);
+  });
+
+  it('exposes file_path in the JSON Schema properties for the LLM', () => {
+    const tool = toolWithContent('');
+    const props = (tool.parameters as { properties: Record<string, unknown> }).properties;
+
+    expect(props).toHaveProperty('path');
+    expect(props).toHaveProperty('file_path');
+  });
+
+  it('reads a file when called with file_path instead of path (integration)', async () => {
+    const tool = toolWithContent('alias content');
+
+    const result = await executeTool(
+      tool,
+      context({ file_path: '/tmp/alias.txt' } as unknown as ReadInput),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.output).toContain('1\talias content');
+  });
+
+  it('normalizes file_path and still respects line_offset (integration)', async () => {
+    const tool = toolWithContent('a\nb\nc');
+
+    const result = await executeTool(
+      tool,
+      context({
+        file_path: '/tmp/alias.txt',
+        line_offset: 2,
+        n_lines: 1,
+      } as unknown as ReadInput),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.output).toContain('2\tb');
+    expect(result.output).not.toContain('1\ta');
   });
 });

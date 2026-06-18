@@ -168,6 +168,7 @@ api_key = "sk-test"
 provider = "local"
 model = "fake-model"
 max_context_size = 1000
+capabilities = ["tool_use"]
 `,
     'utf-8',
   );

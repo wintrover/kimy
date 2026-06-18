@@ -353,6 +353,7 @@ api_key = "sk-test"
 provider = "local"
 model = "test-model"
 max_context_size = 200000
+capabilities = ["tool_use"]
 `,
     'utf-8',
   );

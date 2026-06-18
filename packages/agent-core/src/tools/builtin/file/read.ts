@@ -8,6 +8,7 @@ import { renderPrompt } from '../../../utils/render-prompt';
 import { resolvePathAccessPath } from '../../policies/path-access';
 import { MEDIA_SNIFF_BYTES, detectFileType } from '../../support/file-type';
 import { toInputJsonSchema } from '../../support/input-schema';
+import { aliasedObject } from '../../support/param-alias';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
 import type { WorkspaceConfig } from '../../support/workspace';
 import { makeCarriageReturnsVisible, type LineEndingStyle } from './line-endings';
@@ -19,30 +20,31 @@ export const MAX_BYTES: number = 100 * 1024;
 const S_IFMT = 0o170000;
 const S_IFREG = 0o100000;
 
-const PositiveLineOffsetSchema = z.number().int().min(1);
-const TailLineOffsetSchema = z.number().int().min(-MAX_LINES).max(-1);
-
-export const ReadInputSchema = z.object({
-  path: z
-    .string()
-    .describe(
-      'Path to a text file. Relative paths resolve against the working directory; a path outside the working directory must be absolute. Directories are not supported; use `ls` via Bash for a known directory, or Glob for pattern search.',
-    ),
-  line_offset: z
-    .union([PositiveLineOffsetSchema, TailLineOffsetSchema])
-    .optional()
-    .describe(
-      `The line number to start reading from. Omit to start at line 1. Negative values read from the end of the file; the absolute value cannot exceed ${String(MAX_LINES)}.`,
-    ),
-  n_lines: z
-    .number()
-    .int()
-    .positive()
-    .optional()
-    .describe(
-      `The number of lines to read; the tool also applies its internal cap. Omit to read up to the internal cap of ${String(MAX_LINES)} lines.`,
-    ),
-});
+export const ReadInputSchema = aliasedObject(
+  {
+    path: z
+      .string()
+      .describe(
+        'Path to a text file. Relative paths resolve against the working directory; a path outside the working directory must be absolute. Directories are not supported; use `ls` via Bash for a known directory, or Glob for pattern search.',
+      ),
+    line_offset: z
+      .number()
+      .int()
+      .optional()
+      .describe(
+        `The line number to start reading from (1-based). Omit to start at line 1. Negative values read from the end of the file (e.g., -100 reads the last 100 lines); the absolute value cannot exceed ${String(MAX_LINES)}. Value 0 is not valid — use 1 for the first line.`,
+      ),
+    n_lines: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        `The number of lines to read; the tool also applies its internal cap. Omit to read up to the internal cap of ${String(MAX_LINES)} lines.`,
+      ),
+  },
+  { path: ['file_path'] },
+);
 
 export const ReadOutputSchema = z.object({
   content: z.string(),
@@ -186,7 +188,10 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     private readonly workspace: WorkspaceConfig,
   ) {}
 
-  resolveExecution(args: ReadInput): ToolExecution {
+  resolveExecution(rawArgs: ReadInput): ToolExecution {
+    const args = ReadInputSchema.normalizeInput(
+      rawArgs as Record<string, unknown>,
+    ) as ReadInput;
     const path = resolvePathAccessPath(args.path, {
       kaos: this.kaos,
       workspace: this.workspace,
@@ -238,6 +243,17 @@ export class ReadTool implements BuiltinTool<ReadInput> {
       }
 
       const lineOffset = args.line_offset ?? 1;
+
+      if (lineOffset === 0 || lineOffset < -MAX_LINES) {
+        return {
+          isError: true,
+          output:
+            `Invalid line_offset: ${String(lineOffset)}. ` +
+            `Value must be >= 1 (forward) or between -${String(MAX_LINES)} and -1 (tail). ` +
+            'Value 0 is strictly forbidden.',
+        };
+      }
+
       const requestedLines = args.n_lines ?? MAX_LINES;
       const effectiveLimit = Math.min(requestedLines, MAX_LINES);
 
