@@ -12,6 +12,8 @@ You do not need to use TodoList to record this workflow.
 
 3. Once you have enough context, do not handle the main work yourself. Use AgentSwarm with a `prompt_template` containing the `{{item}}` placeholder and an `items` array for the requested or appropriate number of subagents, partitioning the problem so each item gives one subagent a distinct part of the work. Pass `subagent_type` when the whole swarm should use a non-default subagent profile.
 
+4. **Important:** AgentSwarm must be the only tool call in the response. Do not combine it with Read, Write, Bash, or any other tool in the same response. If you need to read files first, do that in a separate response before calling AgentSwarm.
+
 ## Coordination
 
 - Give each subagent a distinct scope of work.

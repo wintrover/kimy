@@ -630,6 +630,15 @@ export class TurnFlow {
               deduper.endStep();
               return stopForGoalBudget ? { stopTurn: true } : undefined;
             },
+            afterToolBatch: async (ctx) => {
+              const { swarmReorderReminder } = ctx;
+              if (swarmReorderReminder !== undefined && swarmReorderReminder.length > 0) {
+                this.agent.context.appendSystemReminder(swarmReorderReminder, {
+                  kind: 'system_trigger',
+                  name: 'swarm_reorder',
+                });
+              }
+            },
             // oxlint-disable-next-line no-loop-func -- stop hook continuation state is scoped to this turn.
             shouldContinueAfterStop: async (ctx) => {
               const { signal } = ctx;

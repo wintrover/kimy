@@ -13,3 +13,6 @@ coverage/
 plugins/cdn/
 superpowers
 .worktrees/
+.build-hash
+.build-hash.lock
+scripts/bin/kimi

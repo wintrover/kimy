@@ -25,6 +25,7 @@ import {
 import { PathSecurityError } from '../tools/policies/path-access';
 
 import { isUserCancellation } from '../utils/abort';
+import { transformSwarmBatch } from './transform-swarm-batch';
 import { errorMessage, isAbortError } from './errors';
 import type { LoopEventDispatcher, LoopToolCallEvent } from './events';
 import type { LLM, LLMChatResponse } from './llm';
@@ -76,9 +77,9 @@ interface ToolCallBatchContext extends ToolCallStepContext {
   readonly toolCalls: readonly ToolCall[];
 }
 
-type PreflightedToolCall = RunnableToolCall | RejectedToolCall;
+export type PreflightedToolCall = RunnableToolCall | RejectedToolCall;
 
-interface RunnableToolCall {
+export interface RunnableToolCall {
   readonly kind: 'runnable';
   readonly toolCall: ToolCall;
   readonly toolName: string;
@@ -86,7 +87,7 @@ interface RunnableToolCall {
   readonly args: unknown;
 }
 
-interface RejectedToolCall {
+export interface RejectedToolCall {
   readonly kind: 'rejected';
   readonly toolCall: ToolCall;
   readonly toolName: string;
@@ -137,6 +138,7 @@ export async function runToolCallBatch(
 
   const batchStep: ToolCallBatchContext = { ...step, toolCalls: response.toolCalls };
   const calls = response.toolCalls.map((toolCall) => preflightToolCall(step.tools, toolCall));
+  const swarmTransform = transformSwarmBatch(calls);
   const scheduler = new ToolScheduler<PendingToolResult>();
   const pendingResults: Array<Promise<PendingToolResult>> = [];
   let stopTurn = false;
@@ -180,6 +182,7 @@ export async function runToolCallBatch(
       llm: step.llm,
       toolCalls: response.toolCalls,
       results: finalizedResults.map((r) => r.result),
+      swarmReorderReminder: swarmTransform.systemReminder,
     });
   } finally {
     // Preparation or result dispatch can throw after execution has started.

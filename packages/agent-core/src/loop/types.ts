@@ -236,6 +236,7 @@ export type BeforeToolBatchHook = (
 export interface LoopAfterToolBatchContext extends LoopStepHookContext {
   readonly toolCalls: readonly ToolCall[];
   readonly results: readonly ExecutableToolResult[];
+  readonly swarmReorderReminder?: string | undefined;
 }
 
 export type AfterToolBatchHook = (

@@ -11,12 +11,13 @@ export class AgentSwarmExclusiveDenyPermissionPolicy implements PermissionPolicy
 
     if (agentSwarmCount === 0) return;
     if (agentSwarmCount === 1 && toolCalls.length === 1) return;
+    if (agentSwarmCount === 1) return;
 
     return {
       kind: 'deny',
       message:
         agentSwarmCount > 1
-          ? multipleAgentSwarmDeniedMessage(toolCalls.length > agentSwarmCount)
+          ? multipleAgentSwarmDeniedMessage()
           : mixedAgentSwarmDeniedMessage(),
       reason: {
         agent_swarm_tool_calls: agentSwarmCount,
@@ -26,14 +27,10 @@ export class AgentSwarmExclusiveDenyPermissionPolicy implements PermissionPolicy
   }
 }
 
-function multipleAgentSwarmDeniedMessage(hasOtherToolCalls: boolean): string {
-  const suffix = hasOtherToolCalls
-    ? ' AgentSwarm also must not be combined with other tools in the same response.'
-    : '';
+function multipleAgentSwarmDeniedMessage(): string {
   return (
-    'AgentSwarm must be called one swarm at a time. Multiple AgentSwarm calls are not forbidden, ' +
-    'but issue them sequentially: call one AgentSwarm, wait for its result, then call the next; ' +
-    `or merge the work into a single AgentSwarm when one swarm can cover it.${suffix}`
+    'AgentSwarm must be called one swarm at a time. Issue them sequentially: call one AgentSwarm, ' +
+    'wait for its result, then call the next. Multiple AgentSwarm calls in the same response are not allowed.'
   );
 }
 

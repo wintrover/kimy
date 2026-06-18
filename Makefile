@@ -1,4 +1,4 @@
-.PHONY: prepare build typecheck lint lint-fix lint-pkg sherif test test-watch test-coverage clean changeset version publish release dev vis
+.PHONY: prepare build typecheck lint lint-fix lint-pkg sherif test test-watch test-coverage clean changeset version publish release dev vis gate
 
 ## Setup
 
@@ -65,3 +65,8 @@ dev:
 
 vis:
 	pnpm run vis
+
+## Gate (Nim quality gatekeeper)
+
+gate:
+	nim c -d:release --out:scripts/bin/kimi scripts/bin/kimi.nim

@@ -721,8 +721,8 @@ describe('Permission policy chain', () => {
     ]);
   });
 
-  it('denies invalid AgentSwarm batches before auto-mode approval', async () => {
-    const { manager, requestApproval, telemetryTrack } = makePermissionManager(async () => ({
+  it('defers mixed AgentSwarm batches to the transform layer', async () => {
+    const { manager, requestApproval } = makePermissionManager(async () => ({
       decision: 'approved',
     }));
     manager.mode = 'auto';
@@ -733,6 +733,8 @@ describe('Permission policy chain', () => {
     });
     const readCall = toolCall('call_read', 'Read', { path: 'src/a.ts' });
 
+    // Mixed batch (1 AgentSwarm + other tools) is no longer denied by the
+    // permission policy — the transform layer reorders the batch instead.
     await expect(
       manager.beforeToolCall(
         hookContext({
@@ -741,9 +743,38 @@ describe('Permission policy chain', () => {
           toolCalls: [agentSwarmCall, readCall],
         }),
       ),
+    ).resolves.toBeUndefined();
+
+    expect(requestApproval).not.toHaveBeenCalled();
+  });
+
+  it('denies multiple AgentSwarm calls in same response', async () => {
+    const { manager, requestApproval, telemetryTrack } = makePermissionManager(async () => ({
+      decision: 'approved',
+    }));
+    manager.mode = 'auto';
+    const agentSwarmCall1 = toolCall('call_swarm_1', 'AgentSwarm', {
+      description: 'Swarm 1',
+      items: ['a.ts'],
+      prompt_template: 'Review {{item}}',
+    });
+    const agentSwarmCall2 = toolCall('call_swarm_2', 'AgentSwarm', {
+      description: 'Swarm 2',
+      items: ['b.ts'],
+      prompt_template: 'Review {{item}}',
+    });
+
+    await expect(
+      manager.beforeToolCall(
+        hookContext({
+          id: 'call_swarm_1',
+          toolName: 'AgentSwarm',
+          toolCalls: [agentSwarmCall1, agentSwarmCall2],
+        }),
+      ),
     ).resolves.toMatchObject({
       block: true,
-      reason: expect.stringContaining('AgentSwarm must be the only tool call'),
+      reason: expect.stringContaining('one swarm at a time'),
     });
 
     expect(requestApproval).not.toHaveBeenCalled();
@@ -829,7 +860,7 @@ describe('Simple permission policy direct behavior', () => {
     ).toBeUndefined();
   });
 
-  it('denies AgentSwarm mixed with other tool calls in the same response', () => {
+  it('defers mixed AgentSwarm batches to the transform layer', () => {
     const policy = new AgentSwarmExclusiveDenyPermissionPolicy();
     const agentSwarmCall = toolCall('call_agent_swarm', 'AgentSwarm', {
       description: 'Review files',
@@ -838,6 +869,7 @@ describe('Simple permission policy direct behavior', () => {
     });
     const readCall = toolCall('call_read', 'Read', { path: 'src/a.ts' });
 
+    // Mixed batch (1 AgentSwarm + N others) → undefined, lets transform-swarm-batch handle it
     expect(
       policy.evaluate(
         hookContext({
@@ -846,14 +878,7 @@ describe('Simple permission policy direct behavior', () => {
           toolCalls: [agentSwarmCall, readCall],
         }),
       ),
-    ).toMatchObject({
-      kind: 'deny',
-      message: expect.stringContaining('AgentSwarm must be the only tool call'),
-      reason: {
-        agent_swarm_tool_calls: 1,
-        tool_calls: 2,
-      },
-    });
+    ).toBeUndefined();
     expect(
       policy.evaluate(
         hookContext({
@@ -863,7 +888,7 @@ describe('Simple permission policy direct behavior', () => {
           toolCalls: [agentSwarmCall, readCall],
         }),
       ),
-    ).toMatchObject({ kind: 'deny' });
+    ).toBeUndefined();
   });
 
   it('denies multiple AgentSwarm calls with one-at-a-time guidance', () => {
@@ -889,7 +914,7 @@ describe('Simple permission policy direct behavior', () => {
 
     expect(result).toMatchObject({
       kind: 'deny',
-      message: expect.stringContaining('Multiple AgentSwarm calls are not forbidden'),
+      message: expect.stringContaining('Multiple AgentSwarm calls in the same response are not allowed'),
       reason: {
         agent_swarm_tool_calls: 2,
         tool_calls: 2,
@@ -897,9 +922,6 @@ describe('Simple permission policy direct behavior', () => {
     });
     expect(result).toMatchObject({
       message: expect.stringContaining('call one AgentSwarm, wait for its result'),
-    });
-    expect(result).toMatchObject({
-      message: expect.stringContaining('merge the work into a single AgentSwarm'),
     });
   });
 

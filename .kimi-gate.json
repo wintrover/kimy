@@ -1,0 +1,3 @@
+{
+  "build_command": "pnpm --filter=@moonshot-ai/kimi-code run build"
+}
