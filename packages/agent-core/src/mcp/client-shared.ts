@@ -1,6 +1,6 @@
 import { getCoreVersion } from '#/version';
 
-import type { MCPToolDefinition, MCPToolResult } from './types';
+import type { MCPToolAnnotations, MCPToolDefinition, MCPToolResult } from './types';
 
 export const KIMI_MCP_CLIENT_NAME = 'kimi-code';
 // Resolved from agent-core's package.json so MCP servers see the real version
@@ -49,6 +49,7 @@ interface SdkListedTool {
   readonly name: string;
   readonly description?: string;
   readonly inputSchema: Record<string, unknown>;
+  readonly annotations?: Record<string, unknown>;
 }
 
 export function toMcpToolDefinition(tool: SdkListedTool): MCPToolDefinition {
@@ -56,7 +57,21 @@ export function toMcpToolDefinition(tool: SdkListedTool): MCPToolDefinition {
     name: tool.name,
     description: tool.description ?? '',
     inputSchema: tool.inputSchema,
+    annotations: normalizeAnnotations(tool.annotations),
   };
+}
+
+function normalizeAnnotations(
+  raw: Record<string, unknown> | undefined,
+): MCPToolAnnotations | undefined {
+  if (raw === undefined) return undefined;
+  const out: Record<string, unknown> = {};
+  if (typeof raw['title'] === 'string') out['title'] = raw['title'];
+  if (typeof raw['readOnlyHint'] === 'boolean') out['readOnlyHint'] = raw['readOnlyHint'];
+  if (typeof raw['destructiveHint'] === 'boolean') out['destructiveHint'] = raw['destructiveHint'];
+  if (typeof raw['idempotentHint'] === 'boolean') out['idempotentHint'] = raw['idempotentHint'];
+  if (typeof raw['openWorldHint'] === 'boolean') out['openWorldHint'] = raw['openWorldHint'];
+  return Object.keys(out).length > 0 ? (out as MCPToolAnnotations) : undefined;
 }
 
 /**

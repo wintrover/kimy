@@ -84,6 +84,12 @@ export const AgentSwarmToolInputSchema = z
       .describe(
         "Output mode for every spawned subagent. 'artifact' requires each subagent to call YieldArtifact; 'text' uses legacy natural-language summaries. Defaults to 'text'.",
       ),
+    is_critical_task: z
+      .boolean()
+      .optional()
+      .describe(
+        'When true, each spawned subagent runs a sequential-thinking reasoning step before its first LLM turn and fails if reasoning fails.',
+      ),
   })
   .strict();
 
@@ -292,6 +298,7 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
         signal,
         timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
         output_mode: args.output_mode,
+        isCriticalTask: args.is_critical_task,
       };
       if (spec.kind === 'resume') {
         return {

@@ -377,7 +377,17 @@ function transformPermissionData(data: Record<string, unknown>): Record<string, 
   if (rules.length > 0) {
     out['rules'] = rules;
   }
+  if (raw['mcpAutoApprove'] !== undefined) {
+    out['mcpAutoApprove'] = transformMcpAutoApproveRules(raw['mcpAutoApprove']);
+  }
   return out;
+}
+
+function transformMcpAutoApproveRules(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((entry) =>
+    isPlainObject(entry) ? transformPlainObject(entry) : entry,
+  );
 }
 
 function appendPermissionRules(
@@ -588,11 +598,27 @@ function permissionToToml(
   } else {
     delete out['rules'];
   }
+
+  if (permission.mcpAutoApprove !== undefined) {
+    out['mcp_auto_approve'] = permission.mcpAutoApprove.map(mcpAutoApproveRuleToToml);
+  } else {
+    delete out['mcp_auto_approve'];
+  }
   return out;
 }
 
 function permissionRuleToToml(
   rule: NonNullable<PermissionConfig['rules']>[number],
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(rule)) {
+    setDefined(out, camelToSnake(key), value);
+  }
+  return out;
+}
+
+function mcpAutoApproveRuleToToml(
+  rule: NonNullable<PermissionConfig['mcpAutoApprove']>[number],
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(rule)) {

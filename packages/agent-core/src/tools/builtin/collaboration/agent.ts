@@ -93,6 +93,12 @@ export const AgentToolInputSchema = z.preprocess(
       .describe(
         'Whether to allocate an isolated workspace for the subagent. Defaults to true.',
       ),
+    is_critical_task: z
+      .boolean()
+      .optional()
+      .describe(
+        'When true, run a sequential-thinking reasoning step before the first LLM turn and fail the subagent if reasoning fails. Recommended for plan/explore subagents.',
+      ),
   }),
 );
 
@@ -210,6 +216,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
         signal: backgroundController?.signal ?? foregroundDeadline?.signal ?? signal,
         output_mode: args.output_mode,
         isolate_workspace: args.isolate_workspace,
+        isCriticalTask: args.is_critical_task,
       };
 
       let handle: SubagentHandle;

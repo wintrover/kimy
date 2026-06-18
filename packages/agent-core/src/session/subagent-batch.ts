@@ -52,6 +52,7 @@ type BaseQueuedSubagentTask<T> = {
   readonly signal?: AbortSignal;
   readonly output_mode?: 'artifact' | 'text';
   readonly isolate_workspace?: boolean;
+  readonly isCriticalTask?: boolean;
 };
 
 export type SpawnQueuedSubagentTask<T = unknown> = BaseQueuedSubagentTask<T> & {
@@ -296,6 +297,7 @@ export class SubagentBatch<T> {
       suppressRateLimitFailureEvent: true,
       output_mode: task.output_mode,
       isolate_workspace: task.isolate_workspace,
+      isCriticalTask: task.isCriticalTask,
     };
 
     let handle: SubagentHandle;

@@ -79,8 +79,21 @@ export const PermissionRuleSchema = z.object({
   reason: z.string().optional(),
 });
 
+export const McpAutoApproveRuleSchema = z.object({
+  name: z.string().optional(),
+  pattern: z.string().min(1),
+  readOnlyHint: z.boolean().optional(),
+  destructiveHint: z.boolean().optional(),
+  idempotentHint: z.boolean().optional(),
+  openWorldHint: z.boolean().optional(),
+  reason: z.string().optional(),
+});
+
+export type McpAutoApproveRule = z.infer<typeof McpAutoApproveRuleSchema>;
+
 export const PermissionConfigSchema = z.object({
   rules: z.array(PermissionRuleSchema).optional(),
+  mcpAutoApprove: z.array(McpAutoApproveRuleSchema).optional(),
 });
 
 export type PermissionConfig = z.infer<typeof PermissionConfigSchema>;

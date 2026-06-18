@@ -253,6 +253,26 @@ decision = "ask"
 pattern = "Bash"
 ```
 
+### `permission.mcp_auto_approve`
+
+In addition to explicit `allow`/`deny`/`ask` rules, you can declare automatic approval rules for MCP tools based on their qualified names and MCP annotations. These rules are evaluated after ordinary `allow` rules and before the built-in heuristics, so they let you approve read-only MCP tools without disabling the overall approval flow.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `pattern` | `string` | Yes | Glob pattern matched against the qualified MCP tool name (for example, `mcp__code-index__*`) |
+| `read_only_hint` | `boolean` | No | Match only when the MCP tool advertises `readOnlyHint: true` |
+| `destructive_hint` | `boolean` | No | Match only when the MCP tool advertises `destructiveHint: true` or `false` |
+| `idempotent_hint` | `boolean` | No | Match only when the MCP tool advertises `idempotentHint: true` or `false` |
+| `open_world_hint` | `boolean` | No | Match only when the MCP tool advertises `openWorldHint: true` or `false` |
+| `reason` | `string` | No | Description for debugging and auditing |
+
+```toml
+[[permission.mcp_auto_approve]]
+pattern = "mcp__code-index__*"
+read_only_hint = true
+reason = "code-index searches are read-only"
+```
+
 ::: tip
 MCP server declarations are configured in `~/.kimi-code/mcp.json` or the project-local `.kimi-code/mcp.json`, not in `config.toml`. The interactive configuration entry point is `/mcp-config`; see [Model Context Protocol](../customization/mcp.md).
 :::

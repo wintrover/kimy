@@ -21,6 +21,12 @@ import type {
   ToolInfo,
   UserToolRegistration,
 } from './types';
+import {
+  CodeIndexShadowResolver,
+  DefaultToolResolver,
+  ToolResolverChain,
+  type ToolResolverContext,
+} from './resolvers';
 
 export * from './types';
 
@@ -34,6 +40,11 @@ export class ToolManager {
   protected readonly userTools: Map<string, ExecutableTool> = new Map();
   protected readonly mcpTools: Map<string, McpToolEntry> = new Map();
   private loopToolsOverride: readonly ExecutableTool[] | undefined;
+  private readonly resolverChain = new ToolResolverChain([
+    new CodeIndexShadowResolver(),
+    new DefaultToolResolver(),
+  ]);
+  private readonly resolverContext: ToolResolverContext;
   /** server name → list of qualified tool names registered for that server. */
   protected readonly mcpToolsByServer: Map<string, string[]> = new Map();
   protected enabledTools: Set<string> = new Set();
@@ -43,10 +54,30 @@ export class ToolManager {
   private mcpToolStatusUnsubscribe: (() => void) | undefined;
 
   constructor(protected readonly agent: Agent) {
+    this.resolverContext = this.createResolverContext();
     this.attachMcpTools();
     if (agent.config.hasProvider) {
       this.initializeBuiltinTools();
     }
+  }
+
+  private createResolverContext(): ToolResolverContext {
+    return {
+      getBuiltin: (name) => this.builtinTools.get(name),
+      getUser: (name) => {
+        const tool = this.userTools.get(name);
+        return tool !== undefined && this.enabledTools.has(name) ? tool : undefined;
+      },
+      getMcp: (name) => {
+        const entry = this.mcpTools.get(name);
+        return entry !== undefined && this.isMcpToolEnabled(name) ? entry.tool : undefined;
+      },
+      listMcp: () =>
+        Array.from(this.mcpTools.entries())
+          .filter(([name]) => this.isMcpToolEnabled(name))
+          .map(([name, entry]) => ({ name, tool: entry.tool })),
+      isMcpEnabled: (name) => this.isMcpToolEnabled(name),
+    };
   }
 
   protected get toolStore(): ToolStore {
@@ -169,6 +200,7 @@ export class ToolManager {
         name: qualified,
         description: tool.description,
         parameters: tool.parameters,
+        annotations: (tool as { annotations?: ExecutableTool['annotations'] }).annotations,
         resolveExecution: (args) => {
           return {
             approvalRule: qualified,
@@ -448,12 +480,7 @@ export class ToolManager {
         (name) =>
           !(hideGoalMutationTools && (name === 'SetGoalBudget' || name === 'UpdateGoal')),
       )
-      .map(
-        (name) =>
-          this.userTools.get(name) ??
-          this.mcpTools.get(name)?.tool ??
-          this.builtinTools.get(name),
-      )
+      .map((name) => this.resolverChain.resolve(name, this.resolverContext))
       .filter((tool) => !!tool);
   }
 }

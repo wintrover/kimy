@@ -54,12 +54,26 @@ export interface MCPToolResult {
 }
 
 /**
+ * MCP 2025-03-26 tool annotations. These hints are optional metadata returned
+ * by `tools/list` and are used by permission/policy layers to decide whether a
+ * tool can run without explicit approval.
+ */
+export interface MCPToolAnnotations {
+  readonly title?: string;
+  readonly readOnlyHint?: boolean;
+  readonly destructiveHint?: boolean;
+  readonly idempotentHint?: boolean;
+  readonly openWorldHint?: boolean;
+}
+
+/**
  * An MCP tool definition as returned by an MCP server's `tools/list` method.
  */
 export interface MCPToolDefinition {
   name: string;
   description: string;
   inputSchema: unknown;
+  annotations?: MCPToolAnnotations;
 }
 
 /**

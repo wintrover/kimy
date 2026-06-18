@@ -12,6 +12,7 @@
 
 import type { ContentPart, Message, TokenUsage, Tool, ToolCall } from '@moonshot-ai/kosong';
 
+import type { MCPToolAnnotations } from '../mcp/types';
 import type { ToolInputDisplay } from '../tools/display';
 import type { ToolAccesses } from './tool-access';
 import type { LLM } from './llm';
@@ -130,6 +131,8 @@ export interface RunnableToolExecution {
 export type ToolExecution = RunnableToolExecution | ExecutableToolErrorResult;
 
 export interface ExecutableTool<Input = unknown> extends Tool {
+  /** Optional MCP tool annotations propagated from the originating MCP server. */
+  annotations?: MCPToolAnnotations;
   resolveExecution(input: Input): ToolExecution | Promise<ToolExecution>;
 }
 

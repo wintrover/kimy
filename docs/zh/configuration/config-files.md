@@ -253,6 +253,26 @@ decision = "ask"
 pattern = "Bash"
 ```
 
+### `permission.mcp_auto_approve`
+
+除了显式的 `allow`/`deny`/`ask` 规则外，还可以根据 MCP 工具的限定名和 MCP 注解声明自动批准规则。这些规则在普通 `allow` 规则之后、内置启发式策略之前评估，因此可以在不关闭整体审批流程的情况下批准只读 MCP 工具。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `pattern` | `string` | 是 | 与 MCP 工具限定名匹配的 glob 模式，例如 `mcp__code-index__*` |
+| `read_only_hint` | `boolean` | 否 | 仅匹配声明 `readOnlyHint: true` 的 MCP 工具 |
+| `destructive_hint` | `boolean` | 否 | 仅匹配声明 `destructiveHint` 为对应值的 MCP 工具 |
+| `idempotent_hint` | `boolean` | 否 | 仅匹配声明 `idempotentHint` 为对应值的 MCP 工具 |
+| `open_world_hint` | `boolean` | 否 | 仅匹配声明 `openWorldHint` 为对应值的 MCP 工具 |
+| `reason` | `string` | 否 | 说明，用于调试和审计 |
+
+```toml
+[[permission.mcp_auto_approve]]
+pattern = "mcp__code-index__*"
+read_only_hint = true
+reason = "code-index 搜索是只读操作"
+```
+
 ::: tip
 MCP server 的声明配置写在 `~/.kimi-code/mcp.json` 或项目内 `.kimi-code/mcp.json` 中，不在 `config.toml` 里。交互式配置入口是 `/mcp-config`，详见 [Model Context Protocol](../customization/mcp.md)。
 :::

@@ -1,10 +1,14 @@
+import { randomUUID } from 'node:crypto';
+
 import {
   APIProviderRateLimitError,
   isProviderRateLimitError,
+  type ContentPart,
   type TokenUsage,
 } from '@moonshot-ai/kosong';
 
 import type { Agent } from '../agent';
+import type { ExecutableTool } from '../loop';
 import {
   allocateSubagentWorkspace,
   ArtifactSchemaRegistry,
@@ -88,6 +92,11 @@ export interface RunSubagentOptions {
   readonly output_mode?: 'artifact' | 'text';
   readonly isolate_workspace?: boolean;
   readonly isRecoverySynthesis?: boolean;
+  /**
+   * When true, the subagent host runs a `sequential-thinking` reasoning step
+   * before the first LLM turn and aborts the subagent if reasoning fails.
+   */
+  readonly isCriticalTask?: boolean;
 }
 
 export interface SpawnSubagentOptions extends RunSubagentOptions {
@@ -399,6 +408,9 @@ export class SessionSubagentHost {
       const gitContext = await collectGitContext(child.kaos, child.config.cwd);
       if (gitContext) childPrompt = `${gitContext}\n\n${childPrompt}`;
     }
+
+    await runReasoningBootstrap(child, profileName, options);
+    options.signal.throwIfAborted();
 
     this.emitSubagentStarted(parent, childId);
     const turnId = child.turn.prompt([{ type: 'text', text: childPrompt }], SUBAGENT_PROMPT_ORIGIN);
@@ -738,6 +750,86 @@ export class SessionSubagentHost {
       error: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+const REASONING_PROFILES = new Set(['plan', 'explore']);
+const SEQUENTIAL_THINKING_SUFFIX = '__sequentialthinking';
+
+async function runReasoningBootstrap(
+  child: Agent,
+  profileName: string,
+  options: RunSubagentOptions,
+): Promise<void> {
+  if (!REASONING_PROFILES.has(profileName)) return;
+
+  const tool = findSequentialThinkingTool(child);
+  if (tool === undefined) {
+    child.log.debug('sequential-thinking MCP tool not available; skipping reasoning bootstrap', {
+      profileName,
+    });
+    return;
+  }
+
+  const signal = options.signal;
+  signal.throwIfAborted();
+
+  try {
+    const result = await executeTool(tool, {
+      thought: options.prompt,
+      thoughtNumber: 1,
+      totalThoughts: 1,
+      nextThoughtNeeded: false,
+    }, signal);
+
+    if (result.isError === true) {
+      throw new Error(
+        typeof result.output === 'string'
+          ? result.output
+          : 'sequential-thinking returned an error',
+      );
+    }
+
+    const text = extractText(result.output).trim();
+    if (text.length === 0) {
+      throw new Error('sequential-thinking returned empty output');
+    }
+
+    child.context.appendSystemReminder(
+      `Pre-turn reasoning for this ${profileName} task:\n${text}`,
+      { kind: 'system_trigger', name: 'reasoning_bootstrap' },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    child.log.warn('reasoning bootstrap failed', { profileName, error: message });
+    if (options.isCriticalTask === true) {
+      throw new Error(`Critical task reasoning bootstrap failed: ${message}`);
+    }
+  }
+}
+
+function findSequentialThinkingTool(child: Agent): ExecutableTool | undefined {
+  return child.tools.loopTools.find((tool) => tool.name.endsWith(SEQUENTIAL_THINKING_SUFFIX));
+}
+
+async function executeTool(
+  tool: ExecutableTool,
+  args: Record<string, unknown>,
+  signal: AbortSignal,
+): Promise<import('../loop').ExecutableToolResult> {
+  const execution = await tool.resolveExecution(args);
+  if ('isError' in execution && execution.isError === true) {
+    return execution;
+  }
+  return execution.execute({
+    turnId: 'reasoning-bootstrap',
+    toolCallId: randomUUID(),
+    signal,
+  });
+}
+
+function extractText(output: string | ContentPart[]): string {
+  if (typeof output === 'string') return output;
+  return output.map((part) => (part.type === 'text' ? part.text : '')).join('');
 }
 
 async function runChildTurnToCompletion(child: Agent, signal: AbortSignal): Promise<void> {

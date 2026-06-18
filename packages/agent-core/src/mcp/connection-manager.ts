@@ -11,7 +11,7 @@ import { SseMcpClient } from './client-sse';
 import type { UnexpectedCloseReason } from './client-shared';
 import { StdioMcpClient } from './client-stdio';
 import type { McpOAuthService } from './oauth';
-import { assertMcpInputSchema, type MCPClient } from './types';
+import { assertMcpInputSchema, type MCPClient, type MCPToolAnnotations } from './types';
 
 export type McpServerStatus = 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth';
 
@@ -382,7 +382,8 @@ export class McpConnectionManager {
       name: mcpTool.name,
       description: mcpTool.description,
       parameters: assertMcpInputSchema(mcpTool.name, mcpTool.inputSchema),
-    }));
+      annotations: mcpTool.annotations,
+    })) as (Tool & { annotations?: MCPToolAnnotations })[];
   }
 
   private async closeClient(entry: InternalEntry): Promise<void> {

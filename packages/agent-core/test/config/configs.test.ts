@@ -92,6 +92,11 @@ tool = "Read"
 match = "src/**"
 reason = "read src"
 
+[[permission.mcp_auto_approve]]
+pattern = "mcp__code-index__*"
+read_only_hint = true
+reason = "code-index is read-only"
+
 [loop_control]
 max_steps_per_run = 42
 max_retries_per_step = 3
@@ -166,6 +171,13 @@ describe('harness config TOML loader', () => {
           scope: 'user',
           pattern: 'Read(src/**)',
           reason: 'read src',
+        },
+      ],
+      mcpAutoApprove: [
+        {
+          pattern: 'mcp__code-index__*',
+          readOnlyHint: true,
+          reason: 'code-index is read-only',
         },
       ],
     });
@@ -332,6 +344,8 @@ removed_flag = true
     expect(text).toContain('[[permission.rules]]');
     expect(text).toContain('pattern = "Bash(rm *)"');
     expect(text).toContain('pattern = "Read(src/**)"');
+    expect(text).toContain('[[permission.mcp_auto_approve]]');
+    expect(text).toContain('pattern = "mcp__code-index__*"');
     expect(text).not.toContain('[[permission.allow]]');
     expect(text).toContain('max_steps_per_turn = 7');
     expect(text).toContain('GOOGLE_CLOUD_PROJECT = "project-1"');

@@ -16,6 +16,7 @@ import { PlanModeToolApprovePermissionPolicy } from './plan-mode-tool-approve';
 import { PreToolCallHookPermissionPolicy } from './pre-tool-call-hook';
 import { SessionApprovalHistoryPermissionPolicy } from './session-approval-history';
 import { SwarmModeAgentSwarmApprovePermissionPolicy } from './swarm-mode-agent-swarm-approve';
+import { McpAutoApprovePermissionPolicy } from './mcp-auto-approve';
 import {
   UserConfiguredAllowPermissionPolicy,
   UserConfiguredAskPermissionPolicy,
@@ -44,6 +45,8 @@ export function createPermissionDecisionPolicies(agent: Agent): PermissionPolicy
     new UserConfiguredAskPermissionPolicy(agent),
     // User-configured allow rule matches → approve.
     new UserConfiguredAllowPermissionPolicy(agent),
+    // Declarative MCP auto-approve rules match → approve. Runs after explicit user allow rules but before plan-mode/sensitive-file heuristics so read-only MCP tools can be approved without prompting.
+    new McpAutoApprovePermissionPolicy(agent),
     // ExitPlanMode with active plan_review + non-empty plan + non-auto → ask (tracks plan_submitted/plan_resolved itself). Runs before session history so a stale session approval can't bypass review of a new plan body.
     new ExitPlanModeReviewAskPermissionPolicy(agent),
     // EnterPlanMode, Write/Edit on the plan file, or ExitPlanMode with no actionable plan_review → approve.
