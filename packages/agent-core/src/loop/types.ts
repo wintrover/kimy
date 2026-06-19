@@ -134,6 +134,14 @@ export interface ExecutableTool<Input = unknown> extends Tool {
   /** Optional MCP tool annotations propagated from the originating MCP server. */
   annotations?: MCPToolAnnotations;
   resolveExecution(input: Input): ToolExecution | Promise<ToolExecution>;
+  /**
+   * Pre-validation alias normalizer. Called before AJV validation so that
+   * the validator only ever sees canonical parameter names.
+   *
+   * Return type is strictly `Record<string, unknown>` to guarantee no data
+   * loss through the normalization step.
+   */
+  normalizeArgs?(args: Record<string, unknown>): Record<string, unknown>;
 }
 
 /**

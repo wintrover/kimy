@@ -194,6 +194,23 @@ export async function runToolCallBatch(
 }
 
 /**
+ * Normalize-then-validate pipeline.  Alias normalization runs first so AJV
+ * only ever sees canonical parameter names, making alias acceptance
+ * independent of the JSON Schema that the validator compiles against.
+ */
+function normalizeAndValidate(
+  tool: ExecutableTool,
+  rawArgs: unknown,
+): { args: unknown; error: string | null } {
+  const args =
+    typeof tool.normalizeArgs === 'function'
+      ? tool.normalizeArgs(rawArgs as Record<string, unknown>)
+      : rawArgs;
+  const error = validateExecutableToolArgs(tool, args);
+  return { args, error };
+}
+
+/**
  * Provider-order validation pass. It does not run hooks, spawn tools, or write
  * events. Validator compilation may populate the local cache.
  */
@@ -223,17 +240,17 @@ function preflightToolCall(
       output: `Invalid args for tool "${toolName}": malformed JSON in arguments: ${parsedArgs.error}`,
     };
   }
-  const validationError = validateExecutableToolArgs(tool, parsedArgs.data);
+  const { args: normalizedArgs, error: validationError } = normalizeAndValidate(tool, parsedArgs.data);
   if (validationError !== null) {
     return {
       kind: 'rejected',
       toolCall,
       toolName,
-      args: parsedArgs.data,
+      args: normalizedArgs,
       output: `Invalid args for tool "${toolName}": ${validationError}`,
     };
   }
-  return { kind: 'runnable', toolCall, toolName, tool, args: parsedArgs.data };
+  return { kind: 'runnable', toolCall, toolName, tool, args: normalizedArgs };
 }
 
 function parseToolCallArguments(
@@ -300,15 +317,13 @@ async function prepareToolCall(
     return settleSynthetic(decision.args, decision.result);
   }
 
-  const validationError = validateExecutableToolArgs(call.tool, decision.args);
+  const { args: effectiveArgs, error: validationError } = normalizeAndValidate(call.tool, decision.args);
   if (validationError !== null) {
     return settleError(
-      decision.args,
+      effectiveArgs,
       `Invalid args for tool "${call.toolName}" after prepareToolExecution hook: ${validationError}`,
     );
   }
-
-  const effectiveArgs = decision.args;
   let execution: ToolExecution;
   try {
     execution = await call.tool.resolveExecution(effectiveArgs);

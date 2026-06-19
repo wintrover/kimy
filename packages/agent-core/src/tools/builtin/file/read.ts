@@ -183,6 +183,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
   readonly name = 'Read' as const;
   readonly description = READ_DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(ReadInputSchema);
+  readonly normalizeArgs = ReadInputSchema.normalizeInput;
   constructor(
     private readonly kaos: Kaos,
     private readonly workspace: WorkspaceConfig,

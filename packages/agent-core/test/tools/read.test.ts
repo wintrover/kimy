@@ -11,6 +11,7 @@ import {
 } from '../../src/tools/builtin/file/read';
 import { MEDIA_SNIFF_BYTES } from '../../src/tools/support/file-type';
 import type { WorkspaceConfig } from '../../src/tools/support/workspace';
+import { compileToolArgsValidator, validateToolArgs } from '../../src/tools/args-validator';
 import { createFakeKaos, PERMISSIVE_WORKSPACE, toolContentString } from './fixtures/fake-kaos';
 import { executeTool } from './fixtures/execute-tool';
 
@@ -133,6 +134,31 @@ describe('ReadTool', () => {
       // The alias key should be removed
       expect(result.data).not.toHaveProperty('offset');
     }
+  });
+
+  it('exposes offset in the JSON Schema properties for the LLM', () => {
+    const tool = toolWithContent('');
+    const props = (tool.parameters as { properties: Record<string, unknown> }).properties;
+
+    expect(props).toHaveProperty('offset');
+    expect(props).toHaveProperty('line_offset');
+    expect(props).toHaveProperty('file_path');
+    expect(props).toHaveProperty('path');
+  });
+
+  it('AJV validator accepts offset as an additional property', () => {
+    const tool = toolWithContent('');
+    const validator = compileToolArgsValidator(tool.parameters as Record<string, unknown>);
+    const error = validateToolArgs(validator, { path: '/tmp/test.txt', offset: 42 } as never);
+    expect(error).toBeNull();
+  });
+
+  it('normalizeArgs converts offset to line_offset before validation', () => {
+    const tool = toolWithContent('');
+    expect(typeof tool.normalizeArgs).toBe('function');
+    const normalized = tool.normalizeArgs!({ path: '/tmp/test.txt', offset: 42 });
+    expect(normalized).toHaveProperty('line_offset', 42);
+    expect(normalized).not.toHaveProperty('offset');
   });
 
   it('matches permission args with glob path semantics', () => {
