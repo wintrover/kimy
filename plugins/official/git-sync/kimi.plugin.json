@@ -1,0 +1,10 @@
+{
+  "name": "git-sync",
+  "version": "1.0.0",
+  "description": "Two-Phase Rebase-Forward Sync for deterministic branch synchronization. Rebases the secondary branch onto the base, then fast-forwards the base so both refs match.",
+  "keywords": ["git", "sync", "rebase", "branch"],
+  "interface": {
+    "displayName": "Git Sync",
+    "shortDescription": "Rebase and fast-forward branch synchronization"
+  }
+}

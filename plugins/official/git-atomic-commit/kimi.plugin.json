@@ -1,0 +1,10 @@
+{
+  "name": "git-atomic-commit",
+  "version": "1.0.0",
+  "description": "Atomic git commit with Conventional Commits format. Stages specified files, shows a staged diff stat, and creates a single atomic commit.",
+  "keywords": ["git", "commit", "conventional-commits"],
+  "interface": {
+    "displayName": "Git Atomic Commit",
+    "shortDescription": "Stage files and create atomic commits with conventional format"
+  }
+}

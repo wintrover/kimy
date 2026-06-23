@@ -11,6 +11,24 @@
       "source": "./official/kimi-datasource"
     },
     {
+      "id": "git-atomic-commit",
+      "tier": "official",
+      "displayName": "Git Atomic Commit",
+      "version": "1.0.0",
+      "description": "Atomic git commit with Conventional Commits format.",
+      "keywords": ["git", "commit", "conventional-commits"],
+      "source": "./official/git-atomic-commit"
+    },
+    {
+      "id": "git-sync",
+      "tier": "official",
+      "displayName": "Git Sync",
+      "version": "1.0.0",
+      "description": "Two-Phase Rebase-Forward Sync for deterministic branch synchronization.",
+      "keywords": ["git", "sync", "rebase", "branch"],
+      "source": "./official/git-sync"
+    },
+    {
       "id": "superpowers",
       "tier": "curated",
       "displayName": "Superpowers",
