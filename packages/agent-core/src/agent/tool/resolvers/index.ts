@@ -3,7 +3,7 @@ import type { ToolResolver, ToolResolverContext } from './types';
 
 export * from './types';
 export * from './default-resolver';
-export * from './code-index-adapter';
+export * from './intent-router';
 
 /**
  * Ordered chain of resolvers. The first resolver to return a tool wins; the

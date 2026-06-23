@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ExecutableTool } from '../../../src/loop/types';
 import {
-  CodeIndexShadowResolver,
+  IntentRouter,
   DefaultToolResolver,
   ToolResolverChain,
   type ToolResolverContext,
@@ -36,7 +36,7 @@ describe('ToolResolverChain', () => {
   it('returns the first resolved tool in order', () => {
     const userTool = makeTool('Read');
     const chain = new ToolResolverChain([
-      new CodeIndexShadowResolver(),
+      new IntentRouter(),
       new DefaultToolResolver(),
     ]);
     const tool = chain.resolve(
@@ -49,7 +49,7 @@ describe('ToolResolverChain', () => {
   it('falls back to the default resolver when no shadow applies', () => {
     const builtin = makeTool('Grep');
     const chain = new ToolResolverChain([
-      new CodeIndexShadowResolver(),
+      new IntentRouter(),
       new DefaultToolResolver(),
     ]);
     const tool = chain.resolve('Grep', makeContext({ getBuiltin: (name) => (name === 'Grep' ? builtin : undefined) }));
@@ -57,9 +57,9 @@ describe('ToolResolverChain', () => {
   });
 });
 
-describe('CodeIndexShadowResolver', () => {
+describe('IntentRouter', () => {
   it('shadows Grep when code-index search_code_advanced is available', () => {
-    const resolver = new CodeIndexShadowResolver();
+    const resolver = new IntentRouter();
     const builtin = makeTool('Grep');
     const searchTool = makeTool('mcp__code-index__search_code_advanced', {
       annotations: { readOnlyHint: true },
@@ -81,7 +81,7 @@ describe('CodeIndexShadowResolver', () => {
   });
 
   it('does not shadow when code-index tools are missing', () => {
-    const resolver = new CodeIndexShadowResolver();
+    const resolver = new IntentRouter();
     const builtin = makeTool('Grep');
     const context = makeContext({ getBuiltin: (name) => (name === 'Grep' ? builtin : undefined) });
     expect(resolver.resolve('Grep', context)).toBeUndefined();

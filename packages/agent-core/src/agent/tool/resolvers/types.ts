@@ -16,6 +16,15 @@ export interface ToolResolverContext {
   listMcp(): Iterable<{ readonly name: string; readonly tool: ExecutableTool }>;
   /** Returns true when the qualified MCP tool name is exposed by the active profile. */
   isMcpEnabled(name: string): boolean;
+
+  /** Returns cached workspace file count for scale-based routing. */
+  getWorkspaceFileCount?(): number;
+
+  /** Returns true when the MCP server connection for the given server is healthy. */
+  isMcpServerHealthy?(serverName: string): boolean;
+
+  /** Returns the FileDomainConfig built from env/config/defaults. */
+  getFileDomainConfig?(): { nonCodeExtensions: Set<string> };
 }
 
 export interface ToolResolver {

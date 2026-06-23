@@ -23,7 +23,7 @@ import type {
   UserToolRegistration,
 } from './types';
 import {
-  CodeIndexShadowResolver,
+  IntentRouter,
   DefaultToolResolver,
   ToolResolverChain,
   type ToolResolverContext,
@@ -42,7 +42,7 @@ export class ToolManager {
   protected readonly mcpTools: Map<string, McpToolEntry> = new Map();
   private loopToolsOverride: readonly ExecutableTool[] | undefined;
   private readonly resolverChain = new ToolResolverChain([
-    new CodeIndexShadowResolver(),
+    new IntentRouter(),
     new DefaultToolResolver(),
   ]);
   private readonly resolverContext: ToolResolverContext;
@@ -86,6 +86,44 @@ export class ToolManager {
           .filter(([name]) => this.isMcpToolEnabled(name))
           .map(([name, entry]) => ({ name, tool: entry.tool })),
       isMcpEnabled: (name) => this.isMcpToolEnabled(name),
+
+      // NEW: workspace file count from the builtin Glob tool or kaos
+      getWorkspaceFileCount: () => {
+        // The kaos workspace walker is used by GlobTool internally.
+        // We approximate the count from the store if available,
+        // otherwise return -1 (unknown).
+        const stored = (this.store as Record<string, unknown>)['workspaceFileCount'];
+        return typeof stored === 'number' ? stored : -1;
+      },
+
+      // NEW: MCP server health check
+      isMcpServerHealthy: (serverName: string) => {
+        const mcp = this.agent.mcp;
+        if (mcp === undefined) return false;
+        const entry = mcp.list().find(e => e.name === serverName);
+        return entry?.status === 'connected';
+      },
+
+      // NEW: file domain config from env/config/defaults
+      getFileDomainConfig: () => {
+        const DEFAULT_NON_CODE = new Set([
+          '.md', '.mdx', '.txt', '.rst', '.adoc', '.textile',
+          '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.properties',
+          '.xml', '.csv', '.tsv', '.env',
+          '.log', '.out',
+          '.lock',
+          '.svg', '.graphql', '.gql',
+        ]);
+        // Env override: KIMI_CODE_NON_CODE_EXTENSIONS=.csv,.tsv,.dat
+        const envExts = process.env['KIMI_CODE_NON_CODE_EXTENSIONS'];
+        if (envExts !== undefined && envExts.length > 0) {
+          const custom = new Set(
+            envExts.split(',').map(e => e.trim().startsWith('.') ? e.trim() : `.${e.trim()}`)
+          );
+          return { nonCodeExtensions: custom };
+        }
+        return { nonCodeExtensions: DEFAULT_NON_CODE };
+      },
     };
   }
 
