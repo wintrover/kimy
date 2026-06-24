@@ -25,6 +25,7 @@ import { resolve } from 'pathe';
 import type { CLIOptions } from '#/cli/options';
 import { MigrationScreenComponent, type MigrationScreenResult } from '#/migration/index';
 import { appendInputHistory, loadInputHistory } from '#/utils/history/input-history';
+import { RenderTransaction } from '#/tui/render-transaction';
 import { openUrl } from '#/utils/open-url';
 import { getInputHistoryFile } from '#/utils/paths';
 import { detectFdPath, ensureFdPath } from '#/utils/process/fd-detect';
@@ -216,11 +217,13 @@ export class KimiTUI {
   private terminalThemeTrackingDispose: (() => void) | undefined;
   private uninstallRainbowDance: () => void;
   private signalCleanupHandlers: Array<() => void> = [];
+  private readonly renderTransaction: RenderTransaction;
   private isShuttingDown = false;
   private readonly migrationPlan: MigrationPlan | null;
   private readonly migrateOnly: boolean;
   private startupNotice: string | undefined;
   private lastActivityMode: string | undefined;
+  private currentActivityPane: ActivityPaneComponent | null = null;
   private lastHistoryContent: string | undefined;
   readonly streamingUI: StreamingUIController;
   readonly authFlow: AuthFlowController;
@@ -269,6 +272,7 @@ export class KimiTUI {
     this.migrateOnly = startupInput.migrateOnly ?? false;
     this.startupNotice = startupInput.startupNotice;
     this.state = createTUIState(tuiOptions);
+    this.renderTransaction = new RenderTransaction(this.state.ui);
     this.uninstallRainbowDance = installRainbowDance(() => {
       this.state.ui.requestRender();
     });
@@ -1015,28 +1019,40 @@ export class KimiTUI {
   setAppState(patch: Partial<AppState>): void {
     if (!hasPatchChanges(this.state.appState, patch)) return;
     const busyChanged = 'streamingPhase' in patch || 'isCompacting' in patch;
-    Object.assign(this.state.appState, patch);
-    if ('planMode' in patch) this.updateEditorBorderHighlight();
-    this.state.footer.setState(this.state.appState);
-    this.updateActivityPane();
-    if (busyChanged) {
-      this.updateQueueDisplay();
-      this.sessionEventHandler.retryQueuedGoalPromotion();
+    this.renderTransaction.begin();
+    try {
+      Object.assign(this.state.appState, patch);
+      if ('planMode' in patch) this.updateEditorBorderHighlight();
+      this.state.footer.setState(this.state.appState);
+      this.updateActivityPane();
+      if (busyChanged) {
+        this.updateQueueDisplay();
+        this.sessionEventHandler.retryQueuedGoalPromotion();
+      }
+    } finally {
+      this.renderTransaction.commit();
     }
-    this.state.ui.requestRender();
   }
 
   patchLivePane(patch: Partial<LivePaneState>): void {
     if (!hasPatchChanges(this.state.livePane, patch)) return;
-    Object.assign(this.state.livePane, patch);
-    this.updateActivityPane();
-    this.state.ui.requestRender();
+    this.renderTransaction.begin();
+    try {
+      Object.assign(this.state.livePane, patch);
+      this.updateActivityPane();
+    } finally {
+      this.renderTransaction.commit();
+    }
   }
 
   resetLivePane(): void {
-    this.state.livePane = { ...INITIAL_LIVE_PANE };
-    this.updateActivityPane();
-    this.state.ui.requestRender();
+    this.renderTransaction.begin();
+    try {
+      this.state.livePane = { ...INITIAL_LIVE_PANE };
+      this.updateActivityPane();
+    } finally {
+      this.renderTransaction.commit();
+    }
   }
 
   // =========================================================================
@@ -1563,10 +1579,10 @@ export class KimiTUI {
     }
 
     this.lastActivityMode = activityModeKey;
-    this.state.activityContainer.clear();
 
     switch (effectiveMode) {
       case 'hidden':
+        this.clearActivityPane();
         this.stopActivitySpinner();
         this.syncAgentSwarmActivitySpinner(undefined);
         this.state.ui.requestRender();
@@ -1574,16 +1590,15 @@ export class KimiTUI {
       case 'waiting': {
         const spinner = this.ensureActivitySpinner('moon');
         this.syncAgentSwarmActivitySpinner(placeSpinnerInAgentSwarm ? spinner : undefined);
-        if (placeSpinnerInAgentSwarm) break;
-        this.state.activityContainer.addChild(
-          new ActivityPaneComponent({
-            mode: 'waiting',
-            spinner,
-          }),
-        );
+        if (placeSpinnerInAgentSwarm) {
+          this.clearActivityPane();
+          break;
+        }
+        this.syncActivityPane('waiting', spinner);
         break;
       }
       case 'thinking': {
+        this.clearActivityPane();
         this.stopActivitySpinner();
         this.syncAgentSwarmActivitySpinner(undefined);
         break;
@@ -1593,34 +1608,45 @@ export class KimiTUI {
           currentTheme.fg('primary', s),
         );
         this.syncAgentSwarmActivitySpinner(undefined);
-        this.state.activityContainer.addChild(
-          new ActivityPaneComponent({
-            mode: 'composing',
-            spinner,
-          }),
-        );
+        this.syncActivityPane('composing', spinner);
         break;
       }
       case 'tool': {
         const spinner = this.ensureActivitySpinner('moon');
         this.syncAgentSwarmActivitySpinner(placeSpinnerInAgentSwarm ? spinner : undefined);
-        if (placeSpinnerInAgentSwarm) break;
-        this.state.activityContainer.addChild(
-          new ActivityPaneComponent({
-            mode: 'tool',
-            spinner,
-          }),
-        );
+        if (placeSpinnerInAgentSwarm) {
+          this.clearActivityPane();
+          break;
+        }
+        this.syncActivityPane('tool', spinner);
         break;
       }
       case 'idle':
       case 'session': {
+        this.clearActivityPane();
         this.stopActivitySpinner();
         this.syncAgentSwarmActivitySpinner(undefined);
         break;
       }
     }
     this.state.ui.requestRender();
+  }
+
+  private syncActivityPane(mode: ActivityPaneMode, spinner: MoonLoader): void {
+    if (this.currentActivityPane !== null) {
+      this.currentActivityPane.updateMode(mode, spinner);
+    } else {
+      const pane = new ActivityPaneComponent({ mode, spinner });
+      this.currentActivityPane = pane;
+      this.state.activityContainer.addChild(pane);
+    }
+  }
+
+  private clearActivityPane(): void {
+    if (this.currentActivityPane !== null) {
+      this.state.activityContainer.clear();
+      this.currentActivityPane = null;
+    }
   }
 
   private resolveActivityPaneMode(): EffectiveActivityPaneMode {

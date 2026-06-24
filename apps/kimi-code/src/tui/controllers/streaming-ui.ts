@@ -779,7 +779,7 @@ export class StreamingUIController {
       children[idx] = group;
       state.transcriptContainer.invalidate();
     } else {
-      state.transcriptContainer.addChild(group);
+      console.warn('[TUI] upgradeSoloAgentToGroup: solo component not found in transcript, skipping addChild to prevent duplicate');
     }
     group.attach(solo.toolCallView.id, solo);
     return group;
@@ -836,7 +836,7 @@ export class StreamingUIController {
       children[idx] = group;
       state.transcriptContainer.invalidate();
     } else {
-      state.transcriptContainer.addChild(group);
+      console.warn('[TUI] upgradeSoloReadToGroup: solo component not found in transcript, skipping addChild to prevent duplicate');
     }
     group.attach(solo.toolCallView.id, solo);
     return group;

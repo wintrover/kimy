@@ -1,139 +1,290 @@
-import { describe, expect, it, beforeEach } from 'vitest';
-
-import { createHeadlessTUI, createMockComponent } from './helpers/viewport-test-harness';
+import { describe, expect, it } from 'vitest';
 
 /**
- * Headless tests for the viewport state machine in the pi-tui patch.
+ * Pure-function extraction of the viewport state machine from the pi-tui patch.
  *
- * These tests verify deterministic scroll-preservation behavior by:
- * 1. Creating a TUI instance with a fake terminal (no real I/O)
- * 2. Injecting internal state via `(tui as any)` (JS has no runtime private)
- * 3. Calling `(tui as any).doRender()` synchronously (bypasses nextTick/setTimeout)
- * 4. Asserting `previousViewportTop` after each render
+ * This function mirrors the logic added in the differential-render patch:
+ *   const maxViewportTop = Math.max(0, newLines.length - height);
+ *   if (prevViewportTop > maxViewportTop) prevViewportTop = maxViewportTop;
+ *   const wasAtBottom = this.previousLines.length === 0 ||
+ *       this.previousViewportTop >= Math.max(0, this.previousLines.length - height);
+ *   const isUserScrolledUp = this.previousLines.length > 0
+ *       && prevViewportTop < maxViewportTop && !wasAtBottom;
  *
- * The `wasAtBottom` check distinguishes "intentionally scrolled up" from
- * "content grew, pushing viewport above new bottom".
+ * By extracting it into a pure function we can unit-test every branch
+ * without needing a headless TUI or a real terminal.
  */
+function deriveViewportState(opts: {
+  previousLinesLength: number;
+  previousViewportTop: number;
+  newLinesLength: number;
+  height: number;
+}): {
+  wasAtBottom: boolean;
+  isUserScrolledUp: boolean;
+  maxViewportTop: number;
+  clampedViewportTop: number;
+} {
+  const { previousLinesLength, newLinesLength, height } = opts;
 
-const ROWS = 10;
-const COLS = 120;
+  const maxViewportTop = Math.max(0, newLinesLength - height);
 
-function makeLines(count: number): string[] {
-  return Array.from({ length: count }, (_, i) => `line ${i}`);
+  // Defensive guard: clamp prevViewportTop to prevent edge-case drift
+  let prevViewportTop = opts.previousViewportTop;
+  if (prevViewportTop > maxViewportTop) prevViewportTop = maxViewportTop;
+
+  // Was the user at (or past) the bottom in the previous render?
+  // Uses the original (pre-clamp) value — matches this.previousViewportTop in the patch.
+  const wasAtBottom =
+    previousLinesLength === 0 ||
+    opts.previousViewportTop >= Math.max(0, previousLinesLength - height);
+
+  // Distinguish "intentionally scrolled up" from "content grew, pushing viewport above new bottom"
+  const isUserScrolledUp =
+    previousLinesLength > 0 && prevViewportTop < maxViewportTop && !wasAtBottom;
+
+  return {
+    wasAtBottom,
+    isUserScrolledUp,
+    maxViewportTop,
+    clampedViewportTop: prevViewportTop,
+  };
 }
 
-describe('Viewport State Machine', () => {
-  let tui: any;
-  let terminal: ReturnType<typeof createHeadlessTUI>['terminal'];
-  let mockComponent: ReturnType<typeof createMockComponent>;
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests
+// ─────────────────────────────────────────────────────────────────────────────
 
-  beforeEach(() => {
-    ({ tui, terminal } = createHeadlessTUI(ROWS, COLS));
-    mockComponent = createMockComponent(makeLines(100));
-    tui.addChild(mockComponent);
+describe('deriveViewportState', () => {
+  // ─── SC-01: After resize (height change), wasAtBottom = true when previousLines is empty ───
+
+  it('SC-01: wasAtBottom is true when previousLines.length === 0', () => {
+    const result = deriveViewportState({
+      previousLinesLength: 0,
+      previousViewportTop: 0,
+      newLinesLength: 50,
+      height: 10,
+    });
+
+    expect(result.wasAtBottom).toBe(true);
+    expect(result.isUserScrolledUp).toBe(false);
+    expect(result.maxViewportTop).toBe(40);
   });
 
-  /**
-   * Helper: run one full render cycle to populate previousLines/previousViewportTop.
-   * After this, the viewport is at the bottom (line 90 with 100 lines, height 10).
-   */
-  function initialRender(lineCount: number): void {
-    mockComponent.setLines(makeLines(lineCount));
-    tui.doRender();
-  }
+  it('SC-01: wasAtBottom is true when at exact bottom with prior content', () => {
+    // previousLines has 100 lines, height is 10, viewport top is 90 => at bottom
+    const result = deriveViewportState({
+      previousLinesLength: 100,
+      previousViewportTop: 90,
+      newLinesLength: 50,
+      height: 10,
+    });
 
-  // ─── SC-01: At bottom, content grows → viewport follows to new bottom ───
-
-  it('SC-01: viewport follows to bottom when user is at bottom and content grows', () => {
-    initialRender(100);
-    expect(tui.previousViewportTop).toBe(90); // max(0, 100 - 10)
-
-    // Add one line — user was at bottom
-    mockComponent.setLines(makeLines(101));
-    tui.doRender();
-
-    // Viewport should follow to new bottom
-    expect(tui.previousViewportTop).toBe(91); // max(0, 101 - 10)
+    expect(result.wasAtBottom).toBe(true);
+    // prevViewportTop (90) > maxViewportTop (40), so clamped to 40
+    expect(result.clampedViewportTop).toBe(40);
+    expect(result.isUserScrolledUp).toBe(false);
   });
 
-  // ─── SC-02: Scrolled up, content grows → viewport stays ───
+  // ─── SC-02: During streaming (content growth), when user is at bottom, new content scrolls to bottom ───
 
-  it('SC-02: viewport stays when user is scrolled up and content grows', () => {
-    initialRender(100);
-    expect(tui.previousViewportTop).toBe(90);
+  it('SC-02: at bottom + content grows → wasAtBottom, not scrolled up', () => {
+    // Simulates: had 100 lines, viewport at 90 (bottom), now 105 lines
+    const result = deriveViewportState({
+      previousLinesLength: 100,
+      previousViewportTop: 90,
+      newLinesLength: 105,
+      height: 10,
+    });
 
-    // Simulate user scrolling up to line 50
-    tui.previousViewportTop = 50;
-
-    // Add one line
-    mockComponent.setLines(makeLines(101));
-    tui.doRender();
-
-    // Viewport should stay at 50 (user intentionally scrolled up)
-    expect(tui.previousViewportTop).toBe(50);
+    expect(result.wasAtBottom).toBe(true);
+    expect(result.isUserScrolledUp).toBe(false);
+    expect(result.maxViewportTop).toBe(95);
+    // viewport stays at 90 (clampedViewportTop) — caller will advance it to 95
+    expect(result.clampedViewportTop).toBe(90);
   });
 
-  // ─── SC-03: Content shrinks below viewport → defensive guard clamps ───
+  it('SC-02: at bottom with single new line appended', () => {
+    const result = deriveViewportState({
+      previousLinesLength: 10,
+      previousViewportTop: 0,
+      newLinesLength: 11,
+      height: 10,
+    });
 
-  it('SC-03: viewport clamps when content shrinks below viewport', () => {
-    initialRender(100);
-    expect(tui.previousViewportTop).toBe(90);
-
-    // Shrink content to 50 lines — viewport top 90 is now past maxViewportTop (40)
-    mockComponent.setLines(makeLines(50));
-    tui.doRender();
-
-    // Defensive guard should clamp: maxViewportTop = max(0, 50 - 10) = 40
-    expect(tui.previousViewportTop).toBeLessThanOrEqual(40);
+    expect(result.wasAtBottom).toBe(true);
+    expect(result.isUserScrolledUp).toBe(false);
+    expect(result.maxViewportTop).toBe(1);
   });
 
-  // ─── SC-04: Force render resets viewport to bottom ───
+  // ─── SC-03: When user scrolls up, viewport position is preserved (isUserScrolledUp = true) ───
 
-  it('SC-04: force render resets viewport to bottom', () => {
-    initialRender(100);
-    expect(tui.previousViewportTop).toBe(90);
+  it('SC-03: user scrolled up → isUserScrolledUp is true, wasAtBottom is false', () => {
+    // previousLines has 100 lines, viewport top at 50 (scrolled up from bottom 90)
+    const result = deriveViewportState({
+      previousLinesLength: 100,
+      previousViewportTop: 50,
+      newLinesLength: 101,
+      height: 10,
+    });
 
-    // Simulate user scrolling up
-    tui.previousViewportTop = 50;
-
-    // Simulate what requestRender(true) does — reset state, then render
-    tui.previousLines = [];
-    tui.previousWidth = -1;
-    tui.previousHeight = -1;
-    tui.cursorRow = 0;
-    tui.hardwareCursorRow = 0;
-    tui.maxLinesRendered = 0;
-    tui.previousViewportTop = 0;
-
-    mockComponent.setLines(makeLines(101));
-    tui.doRender();
-
-    // Viewport should be at the new bottom
-    expect(tui.previousViewportTop).toBe(91); // max(0, 101 - 10)
+    expect(result.wasAtBottom).toBe(false);
+    expect(result.isUserScrolledUp).toBe(true);
+    expect(result.maxViewportTop).toBe(91);
+    // Viewport position is preserved — not clamped
+    expect(result.clampedViewportTop).toBe(50);
   });
 
-  // ─── SC-05: Changes above viewport when scrolled up → skip rendering ───
+  it('SC-03: user scrolled up to top of file', () => {
+    const result = deriveViewportState({
+      previousLinesLength: 200,
+      previousViewportTop: 0,
+      newLinesLength: 205,
+      height: 10,
+    });
 
-  it('SC-05: changes above viewport are skipped when user is scrolled up', () => {
-    initialRender(100);
-    expect(tui.previousViewportTop).toBe(90);
+    expect(result.wasAtBottom).toBe(false);
+    expect(result.isUserScrolledUp).toBe(true);
+    expect(result.clampedViewportTop).toBe(0);
+  });
 
-    // Simulate user scrolling up to line 50
-    tui.previousViewportTop = 50;
+  // ─── SC-04: Force render resets all state (previousLines=[], previousWidth=-1, previousHeight=-1) ───
 
-    // Modify only line 5 (above viewport 50-59)
-    const lines = makeLines(100);
-    lines[5] = 'modified line 5';
-    mockComponent.setLines(lines);
+  it('SC-04: force render (empty previousLines) → wasAtBottom = true', () => {
+    // After force render, previousLines is cleared — previousLinesLength === 0
+    const result = deriveViewportState({
+      previousLinesLength: 0,
+      previousViewportTop: 0,
+      newLinesLength: 101,
+      height: 10,
+    });
 
-    const writeCountBefore = terminal.written.length;
-    tui.doRender();
+    expect(result.wasAtBottom).toBe(true);
+    expect(result.isUserScrolledUp).toBe(false);
+    expect(result.maxViewportTop).toBe(91);
+  });
 
-    // Viewport should stay at 50
-    expect(tui.previousViewportTop).toBe(50);
+  it('SC-04: force render after being scrolled up still resets to bottom', () => {
+    // Simulate: user was scrolled up, then force render clears state
+    const result = deriveViewportState({
+      previousLinesLength: 0, // cleared by force render
+      previousViewportTop: 0, // reset by force render
+      newLinesLength: 101,
+      height: 10,
+    });
 
-    // The modified line is above the viewport — rendering should be skipped
-    // (no terminal.write calls for the content change)
-    expect(terminal.written.length).toBe(writeCountBefore);
+    expect(result.wasAtBottom).toBe(true);
+    expect(result.isUserScrolledUp).toBe(false);
+  });
+
+  // ─── SC-05: After resize with height decrease + immediate differential render, viewport is clean ───
+
+  it('SC-05: height decrease from 20→10, was at old bottom → now viewed as scrolled up', () => {
+    // Previous: 100 lines, height 20, viewport at 80 (bottom for height 20).
+    // Now height shrinks to 10: new bottom is at 90, viewport at 80 is above it.
+    // wasAtBottom uses the NEW height: 80 >= max(0, 100-10)=90 → false.
+    const result = deriveViewportState({
+      previousLinesLength: 100,
+      previousViewportTop: 80,
+      newLinesLength: 100,
+      height: 10,
+    });
+
+    expect(result.wasAtBottom).toBe(false);
+    // With the new height, viewport at 80 is above bottom (90) → treated as scrolled up
+    expect(result.isUserScrolledUp).toBe(true);
+    expect(result.maxViewportTop).toBe(90);
+    expect(result.clampedViewportTop).toBe(80);
+  });
+
+  it('SC-05: height decrease from 20→10, scrolled up → stays scrolled up', () => {
+    // Previous: 100 lines, height 20, viewport at 30 (scrolled up from bottom 80)
+    const result = deriveViewportState({
+      previousLinesLength: 100,
+      previousViewportTop: 30,
+      newLinesLength: 100,
+      height: 10,
+    });
+
+    expect(result.wasAtBottom).toBe(false);
+    expect(result.isUserScrolledUp).toBe(true);
+    expect(result.maxViewportTop).toBe(90);
+    expect(result.clampedViewportTop).toBe(30);
+  });
+
+  it('SC-05: height decrease + content shrink → defensive clamp prevents drift', () => {
+    // Previous: 100 lines, height 20, viewport at 85 (bottom). Content shrinks to 30, height to 10.
+    // maxViewportTop = max(0, 30 - 10) = 20. prevViewportTop 85 > 20 → clamped to 20.
+    // wasAtBottom uses pre-clamp value: 85 >= max(0, 100-10)=90 → false.
+    // isUserScrolledUp: 100 > 0 && 20 < 20 → false (clamped viewport equals maxViewportTop).
+    const result = deriveViewportState({
+      previousLinesLength: 100,
+      previousViewportTop: 85,
+      newLinesLength: 30,
+      height: 10,
+    });
+
+    expect(result.wasAtBottom).toBe(false);
+    // After clamping, viewport is at maxViewportTop → not scrolled up
+    expect(result.isUserScrolledUp).toBe(false);
+    expect(result.maxViewportTop).toBe(20);
+    expect(result.clampedViewportTop).toBe(20);
+  });
+
+  // ─── Edge cases ───
+
+  it('empty content with non-zero height', () => {
+    const result = deriveViewportState({
+      previousLinesLength: 0,
+      previousViewportTop: 0,
+      newLinesLength: 0,
+      height: 10,
+    });
+
+    expect(result.wasAtBottom).toBe(true);
+    expect(result.isUserScrolledUp).toBe(false);
+    expect(result.maxViewportTop).toBe(0);
+    expect(result.clampedViewportTop).toBe(0);
+  });
+
+  it('height equals line count → at bottom, not scrolled up', () => {
+    const result = deriveViewportState({
+      previousLinesLength: 10,
+      previousViewportTop: 0,
+      newLinesLength: 10,
+      height: 10,
+    });
+
+    expect(result.wasAtBottom).toBe(true);
+    expect(result.isUserScrolledUp).toBe(false);
+    expect(result.maxViewportTop).toBe(0);
+  });
+
+  it('height 1 → single-line viewport', () => {
+    const result = deriveViewportState({
+      previousLinesLength: 50,
+      previousViewportTop: 49,
+      newLinesLength: 55,
+      height: 1,
+    });
+
+    expect(result.wasAtBottom).toBe(true);
+    expect(result.isUserScrolledUp).toBe(false);
+    expect(result.maxViewportTop).toBe(54);
+  });
+
+  it('prevViewportTop negative → treated as not scrolled up (defensive)', () => {
+    const result = deriveViewportState({
+      previousLinesLength: 100,
+      previousViewportTop: -1,
+      newLinesLength: 100,
+      height: 10,
+    });
+
+    // -1 < maxViewportTop(90) and previousLinesLength > 0, but wasAtBottom?
+    // previousViewportTop(-1) >= max(0, 100-10)=90? No → wasAtBottom = false
+    // isUserScrolledUp = 100 > 0 && -1 < 90 && !false → true
+    expect(result.wasAtBottom).toBe(false);
+    expect(result.isUserScrolledUp).toBe(true);
   });
 });

@@ -129,18 +129,19 @@ export class BannerProvider {
   ) {}
 
   async load(fetchImpl: typeof fetch = fetch): Promise<BannerState | null> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, 3000);
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => {
-        controller.abort();
-      }, 3000);
       const response = await fetchImpl(this.url, { signal: controller.signal });
-      clearTimeout(timeout);
       if (!response.ok) return null;
       const json = await response.json();
       return selectBannerState(json, this.clientVersion, new Date(), Math.random);
     } catch {
       return null;
+    } finally {
+      clearTimeout(timeout);
     }
   }
 }

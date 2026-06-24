@@ -87,8 +87,8 @@ export const DEFAULT_TUI_CONFIG: TuiConfig = TuiConfigSchema.parse({
 export class TuiConfigParseError extends Error {
   override readonly name = 'TuiConfigParseError';
   readonly fallback: TuiConfig;
-  constructor(fallback: TuiConfig) {
-    super(INVALID_TUI_CONFIG_MESSAGE);
+  constructor(fallback: TuiConfig, options?: ErrorOptions) {
+    super(INVALID_TUI_CONFIG_MESSAGE, options);
     this.fallback = fallback;
   }
 }
@@ -106,8 +106,8 @@ export async function loadTuiConfig(filePath: string = getTuiConfigPath()): Prom
   try {
     const text = await readFile(filePath, 'utf-8');
     return parseTuiConfig(text);
-  } catch {
-    throw new TuiConfigParseError(DEFAULT_TUI_CONFIG);
+  } catch (error) {
+    throw new TuiConfigParseError(DEFAULT_TUI_CONFIG, { cause: error });
   }
 }
 
