@@ -143,6 +143,7 @@ describe('built-in slash command registry', () => {
         'plan',
         'reload',
         'reload-tui',
+        'render-log',
         'sessions',
         'settings',
         'status',

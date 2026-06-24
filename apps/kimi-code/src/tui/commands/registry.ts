@@ -297,6 +297,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     priority: 60,
     availability: 'always',
   },
+  {
+    name: 'render-log',
+    aliases: [],
+    description: 'Dump render diagnostics log to file',
+    priority: 60,
+    availability: 'always',
+  },
 ] as const satisfies readonly KimiSlashCommand[];
 
 export type BuiltinSlashCommand = (typeof BUILTIN_SLASH_COMMANDS)[number];

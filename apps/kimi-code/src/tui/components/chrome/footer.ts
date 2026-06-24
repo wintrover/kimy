@@ -11,6 +11,7 @@ import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
 
 import { isRainbowDancing, renderDanceFooterModel } from '#/tui/easter-eggs/dance';
+import { isEnabled as isRenderDebugEnabled, getDiagnostics } from '#/tui/render-diagnostics';
 import { currentTheme } from '#/tui/theme';
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { AppState } from '#/tui/types';
@@ -216,6 +217,34 @@ export function formatFooterGitBadge(status: GitStatus, colors: ColorPalette): s
   return `${base} ${pullRequest}`;
 }
 
+/**
+ * Build the render-diagnostics badge shown on line 2 when
+ * `KIMI_CODE_RENDER_DEBUG=1`. Format: `[R: 142 | TX: 12 | DUP: 0]`
+ * where R = totalRecorded, TX = commit-event count, DUP = violation count.
+ * When DUP > 0 the number is highlighted in the warning colour.
+ */
+function formatRenderDebugBadge(colors: ColorPalette): string | null {
+  const diag = getDiagnostics();
+  const violations = diag.getViolationCount();
+
+  // Violations always visible — no env var needed
+  if (violations > 0) {
+    const badge = chalk.hex(colors.warning)(`[DUP: ${String(violations)}]`);
+    if (!isRenderDebugEnabled()) return badge;
+    // With env var, show full badge even when violations > 0
+    const recorded = diag.totalRecorded;
+    const commits = diag.getEvents().filter((e) => e.type === 'commit').length;
+    const base = `[R: ${String(recorded)} | TX: ${String(commits)} | DUP: `;
+    return chalk.hex(colors.textDim)(base) + chalk.hex(colors.warning)(String(violations)) + chalk.hex(colors.textDim)(']');
+  }
+
+  // No violations — full badge only when env var is set
+  if (!isRenderDebugEnabled()) return null;
+  const recorded = diag.totalRecorded;
+  const commits = diag.getEvents().filter((e) => e.type === 'commit').length;
+  return chalk.hex(colors.textDim)(`[R: ${String(recorded)} | TX: ${String(commits)} | DUP: ${String(violations)}]`);
+}
+
 export class FooterComponent implements Component {
   private state: AppState;
   private readonly onRefresh: () => void;
@@ -351,7 +380,8 @@ export class FooterComponent implements Component {
       line1 = truncateToWidth(leftLine, width, '…');
     }
 
-    // ── Line 2: transient hint (bottom-left) + context (right) ──
+    // ── Line 2: render-debug badge (bottom-left) + transient hint + context (right) ──
+    const renderDebugBadge = formatRenderDebugBadge(colors);
     const contextText = formatContextStatus(
       state.contextUsage,
       state.contextTokens,
@@ -359,16 +389,20 @@ export class FooterComponent implements Component {
     );
     const contextWidth = visibleWidth(contextText);
     let line2: string;
-    if (this.transientHint) {
-      const maxHintWidth = Math.max(0, width - contextWidth - 1);
-      const shownHint =
-        visibleWidth(this.transientHint) <= maxHintWidth
-          ? this.transientHint
-          : truncateToWidth(this.transientHint, maxHintWidth, '…');
-      const hintWidth = visibleWidth(shownHint);
-      const pad = Math.max(0, width - hintWidth - contextWidth);
+    if (renderDebugBadge !== null || this.transientHint) {
+      const leftParts: string[] = [];
+      if (renderDebugBadge !== null) leftParts.push(renderDebugBadge);
+      if (this.transientHint) leftParts.push(chalk.hex(colors.warning).bold(this.transientHint));
+      const leftStr = leftParts.join('  ');
+      const maxLeftWidth = Math.max(0, width - contextWidth - 1);
+      const shownLeft =
+        visibleWidth(leftStr) <= maxLeftWidth
+          ? leftStr
+          : truncateToWidth(leftStr, maxLeftWidth, '…');
+      const leftWidth = visibleWidth(shownLeft);
+      const pad = Math.max(0, width - leftWidth - contextWidth);
       line2 =
-        chalk.hex(colors.warning).bold(shownHint) +
+        shownLeft +
         ' '.repeat(pad) +
         chalk.hex(colors.text)(contextText);
     } else {

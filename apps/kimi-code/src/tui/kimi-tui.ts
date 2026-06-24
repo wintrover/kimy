@@ -26,6 +26,8 @@ import type { CLIOptions } from '#/cli/options';
 import { MigrationScreenComponent, type MigrationScreenResult } from '#/migration/index';
 import { appendInputHistory, loadInputHistory } from '#/utils/history/input-history';
 import { RenderTransaction } from '#/tui/render-transaction';
+import { captureCaller, getDiagnostics, isEnabled } from '#/tui/render-diagnostics';
+import type { RenderDiagnostics } from '#/tui/render-diagnostics';
 import { openUrl } from '#/utils/open-url';
 import { getInputHistoryFile } from '#/utils/paths';
 import { detectFdPath, ensureFdPath } from '#/utils/process/fd-detect';
@@ -219,6 +221,7 @@ export class KimiTUI {
   private uninstallRainbowDance: () => void;
   private signalCleanupHandlers: Array<() => void> = [];
   private readonly renderTransaction: RenderTransaction;
+  private readonly renderDiagnostics: RenderDiagnostics | null;
   private isShuttingDown = false;
   private readonly migrationPlan: MigrationPlan | null;
   private readonly migrateOnly: boolean;
@@ -273,7 +276,39 @@ export class KimiTUI {
     this.migrateOnly = startupInput.migrateOnly ?? false;
     this.startupNotice = startupInput.startupNotice;
     this.state = createTUIState(tuiOptions);
-    this.renderTransaction = new RenderTransaction(this.state.ui);
+    this.renderDiagnostics = getDiagnostics();
+    const originalRequestRender = this.state.ui.requestRender.bind(this.state.ui);
+    this.state.ui.requestRender = (force?: boolean) => {
+      const depth = this.renderTransaction.getDepth();
+      const isStreaming = this.state.appState.streamingPhase !== 'idle';
+
+      // Always-on invariant checking (zero cost — no captureCaller)
+      const violation = this.renderDiagnostics.checkInvariant(
+        { type: 'request', caller: '', force: force ?? false, depth, suppressedCount: 0 },
+        isStreaming,
+      );
+      if (violation) {
+        // Capture caller only on violation (one-time cost)
+        this.renderDiagnostics.triggerAutoDump(violation, captureCaller());
+      }
+
+      // Full event recording — opt-in only (expensive per-frame stack capture)
+      if (isEnabled()) {
+        this.renderDiagnostics.record({
+          type: 'request',
+          caller: captureCaller(),
+          force: force ?? false,
+          depth,
+          suppressedCount: 0,
+        });
+      }
+
+      originalRequestRender(force);
+    };
+    this.renderTransaction = new RenderTransaction(
+      this.state.ui,
+      this.renderDiagnostics,
+    );
     this.uninstallRainbowDance = installRainbowDance(() => {
       this.state.ui.requestRender();
     });
@@ -1624,9 +1659,20 @@ export class KimiTUI {
     // so flush → component.updateContent → requestRender is safe.
     // This ensures the single commit render includes the latest text.
     if (this.renderTransaction.getDepth() === 1) {
+      this.renderDiagnostics?.record({
+        type: 'flush',
+        caller: 'commitRenderBatch',
+        force: false,
+        depth: 1,
+        suppressedCount: 0,
+      });
       this.streamingUI.flushNow();
     }
     this.renderTransaction.commit();
+    // Frame Multiplication detection — tick boundary marker
+    if (this.renderDiagnostics) {
+      this.renderDiagnostics.setPostCommit();
+    }
   }
 
   showError(message: string): void {
