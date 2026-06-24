@@ -1,8 +1,10 @@
 import type { Agent } from '../..';
 import type { PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import { PolicyPhase } from '../types';
 
 export class AutoModeAskUserQuestionDenyPermissionPolicy implements PermissionPolicy {
   readonly name = 'auto-mode-ask-user-question-deny';
+  readonly phase = PolicyPhase.DENY;
 
   constructor(private readonly agent: Agent) {}
 

@@ -12,6 +12,7 @@ import {
   type PermissionPolicyContext,
   type PermissionRule,
 } from '../../src/agent/permission';
+import { PolicyPhase, type PermissionPolicy } from '../../src/agent/permission/types';
 import {
   matchPermissionRule,
   parsePattern,
@@ -697,28 +698,76 @@ describe('Permission auto mode', () => {
 });
 
 describe('Permission policy chain', () => {
-  it('keeps built-in policies in document order', () => {
-    expect(createPermissionDecisionPolicies({} as Agent).map((policy) => policy.name)).toEqual([
-      'pre-tool-call-hook',
-      'agent-swarm-exclusive-deny',
-      'auto-mode-ask-user-question-deny',
-      'plan-mode-guard-deny',
-      'user-configured-deny',
-      'auto-mode-approve',
-      'session-approval-history',
-      'user-configured-ask',
-      'user-configured-allow',
-      'mcp-auto-approve',
-      'exit-plan-mode-review-ask',
-      'plan-mode-tool-approve',
-      'sensitive-file-access-ask',
-      'git-control-path-access-ask',
-      'yolo-mode-approve',
-      'swarm-mode-agent-swarm-approve',
-      'default-tool-approve',
-      'git-cwd-write-approve',
-      'fallback-ask',
-    ]);
+  it('all policies declare a valid phase', () => {
+    const validPhases = new Set(Object.values(PolicyPhase));
+    for (const policy of createPermissionDecisionPolicies({} as Agent)) {
+      expect(validPhases.has(policy.phase)).toBe(true);
+    }
+  });
+
+  it('evaluates deny phase before approve phase regardless of registration order', async () => {
+    const evaluations: string[] = [];
+    const mockDenyPolicy: PermissionPolicy = {
+      name: 'mock-deny',
+      phase: PolicyPhase.DENY,
+      evaluate() {
+        evaluations.push('deny');
+        return { kind: 'deny' as const };
+      },
+    };
+    const mockApprovePolicy: PermissionPolicy = {
+      name: 'mock-approve',
+      phase: PolicyPhase.APPROVE,
+      evaluate() {
+        evaluations.push('approve');
+        return { kind: 'approve' as const };
+      },
+    };
+    // Register approve BEFORE deny — phase should still evaluate deny first
+    const { manager } = makePermissionManager(async () => ({ decision: 'approved' }));
+    // Replace policies with shuffled order
+    (manager as any).policies = [mockApprovePolicy, mockDenyPolicy];
+
+    const result = await manager.beforeToolCall(
+      hookContext({ id: 'test_phase_order', toolName: 'Read', args: { path: '/tmp/test.txt' } }),
+    );
+
+    expect(evaluations).toEqual(['deny']);
+    expect(result).toEqual({ block: true, reason: expect.any(String) });
+  });
+
+  it.each([
+    ['Read', { path: '/project/.git/config' }],
+    ['Read', { path: '/project/.git/HEAD' }],
+    ['Read', { path: '/home/user/.env' }],
+  ] as const)('yolo mode auto-approves %s(%o) without prompting', async (toolName, args) => {
+    const { manager, requestApproval } = makePermissionManager(async () => ({
+      decision: 'approved',
+    }));
+    manager.setMode('yolo');
+
+    await expect(
+      manager.beforeToolCall(hookContext({ id: `call_${toolName}_yolo`, toolName, args })),
+    ).resolves.toBeUndefined();
+
+    expect(requestApproval).not.toHaveBeenCalled();
+  });
+
+  it('manual mode asks for .git path reads', async () => {
+    const { manager, requestApproval } = makePermissionManager(async () => ({
+      decision: 'approved',
+    }));
+    // Default mode is manual
+
+    await manager.beforeToolCall(
+      hookContext({
+        id: 'call_read_git',
+        toolName: 'Read',
+        args: { path: '/project/.git/config' },
+      }),
+    );
+
+    expect(requestApproval).toHaveBeenCalled();
   });
 
   it('defers mixed AgentSwarm batches to the transform layer', async () => {
@@ -1932,7 +1981,7 @@ describe('ExitPlanMode permission policy', () => {
     });
   });
 
-  it('reuses session approval for ExitPlanMode without re-prompting plan review', async () => {
+  it('always prompts plan review even when a session approval exists for ExitPlanMode', async () => {
     const { manager, requestApproval, exit } = makePlanPermissionManager({
       mode: 'manual',
       plan: '# Updated Plan',
@@ -1956,9 +2005,16 @@ describe('ExitPlanMode permission policy', () => {
       }),
     );
 
-    expect(requestApproval).not.toHaveBeenCalled();
-    expect(exit).not.toHaveBeenCalled();
-    expect(result).toBeUndefined();
+    // GUARD phase (ExitPlanModeReviewAsk) runs before APPROVE phase (SessionApprovalHistory),
+    // so plan review is always prompted — a stale session approval cannot bypass it.
+    expect(requestApproval).toHaveBeenCalled();
+    expect(exit).toHaveBeenCalled();
+    expect(result).toMatchObject({
+      syntheticResult: {
+        isError: false,
+        output: expect.stringContaining('Exited plan mode'),
+      },
+    });
   });
 
   it('returns a synthetic stop-turn result when the user rejects the plan', async () => {

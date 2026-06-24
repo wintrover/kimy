@@ -11,6 +11,7 @@ import type {
   PermissionRuleDecision,
   PermissionRuleScope,
 } from '../types';
+import { PolicyPhase } from '../types';
 
 const USER_CONFIGURED_SCOPES = new Set<PermissionRuleScope>([
   'turn-override',
@@ -46,6 +47,7 @@ export class UserConfiguredDenyPermissionPolicy
   implements PermissionPolicy
 {
   readonly name = 'user-configured-deny';
+  readonly phase = PolicyPhase.DENY;
 
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
     const match = this.firstMatchingRule(context, 'deny');
@@ -67,6 +69,7 @@ export class UserConfiguredAllowPermissionPolicy
   implements PermissionPolicy
 {
   readonly name = 'user-configured-allow';
+  readonly phase = PolicyPhase.APPROVE;
 
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
     const match = this.firstMatchingRule(context, 'allow');
@@ -83,6 +86,7 @@ export class UserConfiguredAskPermissionPolicy
   implements PermissionPolicy
 {
   readonly name = 'user-configured-ask';
+  readonly phase = PolicyPhase.APPROVE;
 
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
     const match = this.firstMatchingRule(context, 'ask');

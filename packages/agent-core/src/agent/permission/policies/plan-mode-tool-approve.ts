@@ -1,9 +1,11 @@
 import type { Agent } from '../..';
 import type { PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import { PolicyPhase } from '../types';
 import { writeFileAccesses } from './file-access-ask';
 
 export class PlanModeToolApprovePermissionPolicy implements PermissionPolicy {
   readonly name = 'plan-mode-tool-approve';
+  readonly phase = PolicyPhase.APPROVE;
 
   constructor(private readonly agent: Agent) {}
 

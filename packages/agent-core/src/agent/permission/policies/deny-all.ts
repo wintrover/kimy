@@ -1,7 +1,9 @@
+import { PolicyPhase } from '../types';
 import type { PermissionPolicy, PermissionPolicyResult } from '../types';
 
 export class DenyAllPermissionPolicy implements PermissionPolicy {
   readonly name = 'deny-all';
+  readonly phase = PolicyPhase.DENY;
 
   constructor(private readonly message: string) {}
 

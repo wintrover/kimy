@@ -2,10 +2,12 @@ import type { Agent } from '../..';
 import { isWithinDirectory } from '../../../tools/policies/path-access';
 import { findGitWorkTreeMarker } from '../../../tools/support/git-worktree';
 import type { PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import { PolicyPhase } from '../types';
 import { writeFileAccesses } from './file-access-ask';
 
 export class GitCwdWriteApprovePermissionPolicy implements PermissionPolicy {
   readonly name = 'git-cwd-write-approve';
+  readonly phase = PolicyPhase.APPROVE;
 
   constructor(private readonly agent: Agent) {}
 

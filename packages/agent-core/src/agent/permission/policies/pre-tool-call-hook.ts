@@ -2,9 +2,11 @@ import type { Agent } from '../..';
 import { isPlainRecord } from '../../turn/canonical-args';
 import { computeOverrideContext } from '#/guardrail/override-context';
 import type { PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import { PolicyPhase } from '../types';
 
 export class PreToolCallHookPermissionPolicy implements PermissionPolicy {
   readonly name = 'pre-tool-call-hook';
+  readonly phase = PolicyPhase.DENY;
 
   constructor(private readonly agent: Agent) {}
 

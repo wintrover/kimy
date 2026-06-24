@@ -10,11 +10,17 @@ import {
   type GitWorkTreeMarker,
 } from '../../../tools/support/git-worktree';
 import type { PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import { PolicyPhase } from '../types';
 
 export class SensitiveFileAccessAskPermissionPolicy implements PermissionPolicy {
   readonly name = 'sensitive-file-access-ask';
+  readonly phase = PolicyPhase.GUARD;
+
+  constructor(private readonly agent: Agent) {}
 
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
+    // In yolo/auto mode, skip — let the approve phase handle it.
+    if (this.agent.permission.mode === 'yolo' || this.agent.permission.mode === 'auto') return;
     const access = fileAccesses(context).find((fileAccess) =>
       isSensitiveFile(fileAccess.path),
     );
@@ -28,10 +34,13 @@ export class SensitiveFileAccessAskPermissionPolicy implements PermissionPolicy 
 
 export class GitControlPathAccessAskPermissionPolicy implements PermissionPolicy {
   readonly name = 'git-control-path-access-ask';
+  readonly phase = PolicyPhase.GUARD;
 
   constructor(private readonly agent: Agent) {}
 
   async evaluate(context: PermissionPolicyContext): Promise<PermissionPolicyResult | undefined> {
+    // In yolo/auto mode, skip — let the approve phase handle it.
+    if (this.agent.permission.mode === 'yolo' || this.agent.permission.mode === 'auto') return;
     const cwd = this.agent.config.cwd;
     if (cwd.length === 0) return;
     const pathClass = this.agent.kaos.pathClass();

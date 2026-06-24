@@ -1,7 +1,9 @@
 import type { PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import { PolicyPhase } from '../types';
 
 export class AgentSwarmExclusiveDenyPermissionPolicy implements PermissionPolicy {
   readonly name = 'agent-swarm-exclusive-deny';
+  readonly phase = PolicyPhase.DENY;
 
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
     const toolCalls = context.toolCalls;

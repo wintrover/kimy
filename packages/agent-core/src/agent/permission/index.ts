@@ -250,10 +250,14 @@ export class PermissionManager {
   private async evaluatePolicies(
     context: PermissionPolicyContext,
   ): Promise<PolicyEvaluation | undefined> {
-    for (const policy of this.policies) {
-      const result = await policy.evaluate(context);
-      if (result !== undefined) {
-        return { policyName: policy.name, result };
+    const phases = [...new Set(this.policies.map((p) => p.phase))].toSorted((a, b) => a - b);
+    for (const phase of phases) {
+      for (const policy of this.policies) {
+        if (policy.phase !== phase) continue;
+        const result = await policy.evaluate(context);
+        if (result !== undefined) {
+          return { policyName: policy.name, result };
+        }
       }
     }
     return undefined;

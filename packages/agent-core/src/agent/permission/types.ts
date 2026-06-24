@@ -93,8 +93,20 @@ export type PermissionPolicyResult =
       readonly resolveError?: (error: unknown) => PermissionPolicyResolution | undefined;
     };
 
+/** Evaluation phases. Policies are evaluated in phase order (lowest first). */
+export const PolicyPhase = {
+  DENY: 0,
+  GUARD: 100,
+  APPROVE: 200,
+  ASK: 300,
+  FALLBACK: 400,
+} as const;
+
+export type PolicyPhaseValue = (typeof PolicyPhase)[keyof typeof PolicyPhase];
+
 export interface PermissionPolicy {
   readonly name: string;
+  readonly phase: PolicyPhaseValue;
   evaluate(
     context: PermissionPolicyContext,
   ): PermissionPolicyResult | undefined | Promise<PermissionPolicyResult | undefined>;

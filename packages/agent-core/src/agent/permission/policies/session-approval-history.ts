@@ -8,9 +8,11 @@ import type {
   PermissionPolicyContext,
   PermissionPolicyResult,
 } from '../types';
+import { PolicyPhase } from '../types';
 
 export class SessionApprovalHistoryPermissionPolicy implements PermissionPolicy {
   readonly name = 'session-approval-history';
+  readonly phase = PolicyPhase.APPROVE;
 
   constructor(private readonly agent: Agent) {}
 

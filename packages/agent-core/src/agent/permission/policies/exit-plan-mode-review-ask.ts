@@ -1,5 +1,6 @@
 import type { Agent } from '../..';
 import type { ApprovalResponse, PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import { PolicyPhase } from '../types';
 
 interface ExitPlanModeOption {
   readonly label: string;
@@ -14,6 +15,7 @@ interface PlanReviewDisplay {
 
 export class ExitPlanModeReviewAskPermissionPolicy implements PermissionPolicy {
   readonly name = 'exit-plan-mode-review-ask';
+  readonly phase = PolicyPhase.GUARD;
 
   constructor(private readonly agent: Agent) {}
 
