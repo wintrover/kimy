@@ -17,6 +17,7 @@ export {
 export { resolveLoggingConfig } from './logging/resolve-config';
 export type { ResolveLoggingInput } from './logging/resolve-config';
 export { installGlobalProxyDispatcher } from './utils/proxy';
+export { slugifyWorkDirName } from './utils/workdir-slug';
 export type {
   LogContext,
   LogEntry,

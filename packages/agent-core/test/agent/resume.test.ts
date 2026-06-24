@@ -39,7 +39,12 @@ describe('Agent resume', () => {
     expect(persistence.appended).toEqual([]);
     await ctx.expectResumeMatches();
 
+    // Two responses are needed because PlanModeTurnStopPolicy forces a
+    // continuation when the model ends its turn without calling ExitPlanMode.
+    // First response triggers the "first failure" (continue with reminder);
+    // second response triggers the "second failure" (force exit plan mode).
     ctx.mockNextResponse({ type: 'text', text: 'Fresh response after resume.' });
+    ctx.mockNextResponse({ type: 'text', text: 'Acknowledged plan exit.' });
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Fresh prompt after resume' }] });
     await ctx.untilTurnEnd();
 
@@ -59,6 +64,13 @@ describe('Agent resume', () => {
         messages:
           assistant: text "Historical compacted summary."
           user: text "Fresh prompt after resume"
+          user: text <plan-mode-reminder>
+
+      call 2:
+        messages:
+          <last>
+          assistant: text "Fresh response after resume."
+          user: text "Your turn ended without calling ExitPlanMode or AskUserQuestion. You MUST call ExitPlanMode now to present your plan for user approval, or call AskUserQuestion if you need clarification first. Do NOT end your turn with text only."
           user: text <plan-mode-reminder>
     `);
   });

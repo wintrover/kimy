@@ -21,7 +21,6 @@ export type {
   LoopStoppedStepContext,
   LoopTerminalStepStopReason,
   LoopTurnStopReason,
-  StopReason,
   RecordStepUsageResult,
   ShouldContinueAfterStopHook,
   ShouldContinueAfterStopResult,

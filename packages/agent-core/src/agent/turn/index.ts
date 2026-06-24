@@ -44,6 +44,11 @@ import {
   runBeforeStepPipeline,
   type StepMiddleware,
 } from '#/session/step-middleware';
+import {
+  createTurnStopPolicies,
+  type TurnStopPolicy,
+  type TurnStopPolicyContext,
+} from '#/session/turn-stop-policy';
 
 interface ActiveTurn {
   readonly turnId: number;
@@ -113,8 +118,11 @@ export class TurnFlow {
   private readonly interruptedTelemetryTurnIds = new Set<number>();
   private readonly stepFailureByTurn = new Map<number, LoopTurnInterruptedEvent>();
   private currentStep = 0;
+  private readonly turnStopPolicies: readonly TurnStopPolicy[];
 
-  constructor(protected readonly agent: Agent) {}
+  constructor(protected readonly agent: Agent) {
+    this.turnStopPolicies = createTurnStopPolicies(this.agent);
+  }
 
   // Returns the new turnId, or null if the turn was marked as resuming.
   prompt(input: readonly ContentPart[], origin: PromptOrigin = USER_PROMPT_ORIGIN): number | null {
@@ -578,6 +586,7 @@ export class TurnFlow {
     let stopHookContinuationUsed = false;
     let goalOutcomeMessageContinuationUsed = false;
     const deduper = new ToolCallDeduplicator({ telemetry: this.agent.telemetry });
+    const turnToolCallNames = new Set<string>();
 
     await this.agent.mcp?.waitForInitialLoad(signal);
     // Surface the active goal at the start of the turn (append-only; no-op when
@@ -644,6 +653,9 @@ export class TurnFlow {
               return stopForGoalBudget ? { stopTurn: true } : undefined;
             },
             afterToolBatch: async (ctx) => {
+              for (const tc of ctx.toolCalls) {
+                turnToolCallNames.add(tc.name);
+              }
               const { swarmReorderReminder } = ctx;
               if (swarmReorderReminder !== undefined && swarmReorderReminder.length > 0) {
                 this.agent.context.appendSystemReminder(swarmReorderReminder, {
@@ -691,6 +703,25 @@ export class TurnFlow {
                     },
                   );
                   return { continue: true };
+                }
+              }
+
+              // 3.5. TurnStopPolicy chain — extensible turn-stop decisions.
+              // Policies are evaluated in order; the first non-undefined result wins.
+              for (const policy of this.turnStopPolicies) {
+                const policyCtx: TurnStopPolicyContext = {
+                  stopReason: ctx.stopReason,
+                  toolCallNames: turnToolCallNames,
+                };
+                const result = await policy.evaluate(policyCtx);
+                if (result !== undefined) {
+                  if (result.continue && result.message) {
+                    this.agent.context.appendUserMessage(
+                      [{ type: 'text', text: result.message }],
+                      { kind: 'system_trigger', name: result.originName ?? policy.name },
+                    );
+                  }
+                  return { continue: result.continue };
                 }
               }
 

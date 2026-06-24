@@ -431,6 +431,7 @@ describe('plan allows safe tool flow', () => {
 
     ctx.mockNextResponse({ type: 'text', text: 'I will inspect safely.' }, bashCall);
     ctx.mockNextResponse({ type: 'text', text: 'The safe command printed plan-safe.' });
+    ctx.mockNextResponse({ type: 'text', text: 'Calling ExitPlanMode now.' });
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Inspect without mutating files' }] });
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
       [wire] permission.set_mode         { "mode": "yolo", "time": "<time>" }
@@ -463,6 +464,19 @@ describe('plan allows safe tool flow', () => {
       [emit] turn.step.completed         { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 563, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
       [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 563, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
       [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 575, "maxContextTokens": 1000000, "contextUsage": 0.000575, "planMode": true, "swarmMode": false, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 1099, "output": 35, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1099, "output": 35, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 1099, "output": 35, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Your turn ended without calling ExitPlanMode or AskUserQuestion. You MUST call ExitPlanMode now to present your plan for user approval, or call AskUserQuestion if you need clarification first. Do NOT end your turn with text only." } ], "toolCalls": [], "origin": { "kind": "system_trigger", "name": "plan_mode_guard" } }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<plan-mode-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "plan_mode" } }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-5>", "turnId": "0", "step": 3 }, "time": "<time>" }
+      [emit] turn.step.started           { "turnId": 0, "step": 3, "stepId": "<uuid-5>" }
+      [emit] assistant.delta             { "turnId": 0, "delta": "Calling ExitPlanMode now." }
+      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-6>", "turnId": "0", "step": 3, "stepUuid": "<uuid-5>", "part": { "type": "text", "text": "Calling ExitPlanMode now." } }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-5>", "turnId": "0", "step": 3, "usage": { "inputOther": 1161, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 0, "step": 3, "stepId": "<uuid-5>", "usage": { "inputOther": 1161, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 1161, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 1171, "maxContextTokens": 1000000, "contextUsage": 0.001171, "planMode": true, "swarmMode": false, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 2260, "output": 45, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 2260, "output": 45, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 2260, "output": 45, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] plan_mode.exit              { "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 1171, "maxContextTokens": 1000000, "contextUsage": 0.001171, "planMode": false, "swarmMode": false, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 2260, "output": 45, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 2260, "output": 45, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 2260, "output": 45, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\n⚠️ Plan mode was automatically exited because the model failed to call ExitPlanMode after two consecutive attempts. The session has returned to normal mode. Any partial plan content has been preserved in the plan file.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "system_trigger", "name": "plan_mode_force_exit" } }, "time": "<time>" }
       [emit] turn.ended                  { "turnId": 0, "reason": "completed" }
     `);
     await ctx.expectResumeMatches();
@@ -484,6 +498,7 @@ describe('plan mode Bash ordinary permission behavior', () => {
 
     ctx.mockNextResponse({ type: 'text', text: 'I will mutate a file.' }, bashCall);
     ctx.mockNextResponse({ type: 'text', text: 'The command completed.' });
+    ctx.mockNextResponse({ type: 'text', text: 'Calling ExitPlanMode now.' });
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Remove forbidden.txt' }] });
 
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
@@ -517,6 +532,19 @@ describe('plan mode Bash ordinary permission behavior', () => {
       [emit] turn.step.completed         { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 559, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
       [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 559, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
       [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 568, "maxContextTokens": 1000000, "contextUsage": 0.000568, "planMode": true, "swarmMode": false, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 1092, "output": 32, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1092, "output": 32, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 1092, "output": 32, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Your turn ended without calling ExitPlanMode or AskUserQuestion. You MUST call ExitPlanMode now to present your plan for user approval, or call AskUserQuestion if you need clarification first. Do NOT end your turn with text only." } ], "toolCalls": [], "origin": { "kind": "system_trigger", "name": "plan_mode_guard" } }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<plan-mode-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "plan_mode" } }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-5>", "turnId": "0", "step": 3 }, "time": "<time>" }
+      [emit] turn.step.started           { "turnId": 0, "step": 3, "stepId": "<uuid-5>" }
+      [emit] assistant.delta             { "turnId": 0, "delta": "Calling ExitPlanMode now." }
+      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-6>", "turnId": "0", "step": 3, "stepUuid": "<uuid-5>", "part": { "type": "text", "text": "Calling ExitPlanMode now." } }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-5>", "turnId": "0", "step": 3, "usage": { "inputOther": 1154, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 0, "step": 3, "stepId": "<uuid-5>", "usage": { "inputOther": 1154, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 1154, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 1164, "maxContextTokens": 1000000, "contextUsage": 0.001164, "planMode": true, "swarmMode": false, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 2246, "output": 42, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 2246, "output": 42, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 2246, "output": 42, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] plan_mode.exit              { "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 1164, "maxContextTokens": 1000000, "contextUsage": 0.001164, "planMode": false, "swarmMode": false, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 2246, "output": 42, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 2246, "output": 42, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 2246, "output": 42, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\n⚠️ Plan mode was automatically exited because the model failed to call ExitPlanMode after two consecutive attempts. The session has returned to normal mode. Any partial plan content has been preserved in the plan file.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "system_trigger", "name": "plan_mode_force_exit" } }, "time": "<time>" }
       [emit] turn.ended                  { "turnId": 0, "reason": "completed" }
     `);
     expect(toolResultText(ctx.agent.context.history)).toContain('removed');
