@@ -44,3 +44,17 @@ export interface Hintable {
 export interface TerminalSizable {
   getTerminalSize(): { rows: number; columns: number };
 }
+
+/**
+ * Controllers that batch multiple mutations into a single render.
+ *
+ * Wrapping a sequence of state changes in beginRenderBatch/commitRenderBatch
+ * ensures that intermediate requestRender() calls are suppressed and only
+ * one render fires at commit time.
+ *
+ * ⚠️ SYNC ONLY: the begin/commit boundary must not contain async yields.
+ */
+export interface RenderBatchable {
+  beginRenderBatch(): void;
+  commitRenderBatch(): void;
+}

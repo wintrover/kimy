@@ -1,5 +1,5 @@
 import type { Component, Focusable } from '@earendil-works/pi-tui';
-import type { TranscriptContainerHost, TerminalSizable } from '#/tui/types/traits';
+import type { RenderBatchable, TranscriptContainerHost, TerminalSizable } from '#/tui/types/traits';
 import type {
   AgentStatusUpdatedEvent,
   AssistantDeltaEvent,
@@ -85,7 +85,7 @@ import type {
 import type { TUIState } from '../tui-state';
 import { createGoal as startGoalCommand } from '../commands/goal';
 
-export interface SessionEventHost extends TranscriptContainerHost, TerminalSizable {
+export interface SessionEventHost extends TranscriptContainerHost, TerminalSizable, RenderBatchable {
   state: TUIState;
   session: Session | undefined;
   aborted: boolean;
@@ -416,109 +416,134 @@ export class SessionEventHandler {
   }
 
   private handleThinkingDelta(event: ThinkingDeltaEvent): void {
-    const { state, streamingUI } = this.host;
-    streamingUI.appendThinkingDelta(event.delta);
-    this.host.patchLivePane({ mode: 'idle' });
-    if (state.appState.streamingPhase !== 'thinking') {
-      this.host.setAppState({ streamingPhase: 'thinking', streamingStartTime: Date.now() });
+    this.host.beginRenderBatch();
+    try {
+      const { state, streamingUI } = this.host;
+      streamingUI.appendThinkingDelta(event.delta);
+      this.host.patchLivePane({ mode: 'idle' });
+      if (state.appState.streamingPhase !== 'thinking') {
+        this.host.setAppState({ streamingPhase: 'thinking', streamingStartTime: Date.now() });
+      }
+      streamingUI.scheduleFlush();
+    } finally {
+      this.host.commitRenderBatch();
     }
-    streamingUI.scheduleFlush();
   }
 
   private handleAssistantDelta(event: AssistantDeltaEvent): void {
-    const { state, streamingUI } = this.host;
-    if (streamingUI.hasThinkingDraft()) {
-      streamingUI.flushThinkingToTranscript('idle');
-    }
+    this.host.beginRenderBatch();
+    try {
+      const { state, streamingUI } = this.host;
+      if (streamingUI.hasThinkingDraft()) {
+        streamingUI.flushThinkingToTranscript('idle');
+      }
 
-    if (event.delta.trim().length > 0) {
-      this.currentTurnHasAssistantText = true;
-      this.pendingModelBlockedFallback = undefined;
-    }
-    streamingUI.appendAssistantDelta(event.delta);
+      if (event.delta.trim().length > 0) {
+        this.currentTurnHasAssistantText = true;
+        this.pendingModelBlockedFallback = undefined;
+      }
+      streamingUI.appendAssistantDelta(event.delta);
 
-    this.host.patchLivePane({
-      mode: 'idle',
-      pendingApproval: null,
-      pendingQuestion: null,
-    });
-    if (state.appState.streamingPhase !== 'composing') {
-      this.host.setAppState({ streamingPhase: 'composing', streamingStartTime: Date.now() });
+      this.host.patchLivePane({
+        mode: 'idle',
+        pendingApproval: null,
+        pendingQuestion: null,
+      });
+      if (state.appState.streamingPhase !== 'composing') {
+        this.host.setAppState({ streamingPhase: 'composing', streamingStartTime: Date.now() });
+      }
+      streamingUI.scheduleFlush();
+    } finally {
+      this.host.commitRenderBatch();
     }
-    streamingUI.scheduleFlush();
   }
 
   private handleHookResult(event: HookResultEvent): void {
-    this.host.streamingUI.flushNow();
-    if (this.host.streamingUI.hasThinkingDraft()) {
-      this.host.streamingUI.flushThinkingToTranscript('idle');
+    this.host.beginRenderBatch();
+    try {
+      this.host.streamingUI.flushNow();
+      if (this.host.streamingUI.hasThinkingDraft()) {
+        this.host.streamingUI.flushThinkingToTranscript('idle');
+      }
+      this.host.streamingUI.finalizeAssistantStream();
+      if (event.content.trim().length > 0) {
+        this.currentTurnHasAssistantText = true;
+        this.pendingModelBlockedFallback = undefined;
+      }
+      this.host.appendTranscriptEntry({
+        id: nextTranscriptId(),
+        kind: 'assistant',
+        turnId: String(event.turnId),
+        renderMode: 'markdown',
+        content: formatHookResultMarkdown(event),
+      });
+      this.host.patchLivePane({
+        mode: 'idle',
+        pendingApproval: null,
+        pendingQuestion: null,
+      });
+    } finally {
+      this.host.commitRenderBatch();
     }
-    this.host.streamingUI.finalizeAssistantStream();
-    if (event.content.trim().length > 0) {
-      this.currentTurnHasAssistantText = true;
-      this.pendingModelBlockedFallback = undefined;
-    }
-    this.host.appendTranscriptEntry({
-      id: nextTranscriptId(),
-      kind: 'assistant',
-      turnId: String(event.turnId),
-      renderMode: 'markdown',
-      content: formatHookResultMarkdown(event),
-    });
-    this.host.patchLivePane({
-      mode: 'idle',
-      pendingApproval: null,
-      pendingQuestion: null,
-    });
   }
 
   private handleToolCall(event: ToolCallStartedEvent): void {
-    const { streamingUI } = this.host;
-    streamingUI.flushNow();
-    const { turnId, step } = streamingUI.getTurnContext();
-    const toolCall: ToolCallBlockData = {
-      id: event.toolCallId,
-      name: event.name,
-      args: argsRecord(event.args),
-      description: event.description,
-      display: event.display,
-      step,
-      turnId,
-    };
-    streamingUI.registerToolCall(toolCall);
-    if (event.name === 'AgentSwarm') {
-      this.subAgentEventHandler.handleAgentSwarmToolCallStarted(event.toolCallId, toolCall.args);
+    this.host.beginRenderBatch();
+    try {
+      const { streamingUI } = this.host;
+      streamingUI.flushNow();
+      const { turnId, step } = streamingUI.getTurnContext();
+      const toolCall: ToolCallBlockData = {
+        id: event.toolCallId,
+        name: event.name,
+        args: argsRecord(event.args),
+        description: event.description,
+        display: event.display,
+        step,
+        turnId,
+      };
+      streamingUI.registerToolCall(toolCall);
+      if (event.name === 'AgentSwarm') {
+        this.subAgentEventHandler.handleAgentSwarmToolCallStarted(event.toolCallId, toolCall.args);
+      }
+      this.host.patchLivePane({
+        mode: 'tool',
+        pendingApproval: null,
+        pendingQuestion: null,
+      });
+    } finally {
+      this.host.commitRenderBatch();
     }
-    this.host.patchLivePane({
-      mode: 'tool',
-      pendingApproval: null,
-      pendingQuestion: null,
-    });
   }
 
   private handleToolCallDelta(event: ToolCallDeltaEvent): void {
     if (event.toolCallId.length === 0) return;
-    const { state, streamingUI } = this.host;
-    streamingUI.accumulateToolCallDelta(event.toolCallId, event.name, event.argumentsPart);
-    const preview = streamingUI.getStreamingToolCallPreview(event.toolCallId);
-    if (
-      preview !== undefined &&
-      (preview.name === 'AgentSwarm' || this.subAgentEventHandler.hasAgentSwarmProgress(event.toolCallId))
-    ) {
-      this.subAgentEventHandler.handleAgentSwarmToolCallDelta(event.toolCallId, preview.args, {
-        streamingArguments: preview.argumentsText,
-      });
-    }
+    this.host.beginRenderBatch();
+    try {
+      const { state, streamingUI } = this.host;
+      streamingUI.accumulateToolCallDelta(event.toolCallId, event.name, event.argumentsPart);
+      const preview = streamingUI.getStreamingToolCallPreview(event.toolCallId);
+      if (
+        preview !== undefined &&
+        (preview.name === 'AgentSwarm' || this.subAgentEventHandler.hasAgentSwarmProgress(event.toolCallId))
+      ) {
+        this.subAgentEventHandler.handleAgentSwarmToolCallDelta(event.toolCallId, preview.args, {
+          streamingArguments: preview.argumentsText,
+        });
+      }
 
-    this.host.patchLivePane({
-      mode: 'tool',
-      pendingApproval: null,
-      pendingQuestion: null,
-    });
-    if (state.appState.streamingPhase !== 'composing') {
-      this.host.setAppState({ streamingPhase: 'composing', streamingStartTime: Date.now() });
+      this.host.patchLivePane({
+        mode: 'tool',
+        pendingApproval: null,
+        pendingQuestion: null,
+      });
+      if (state.appState.streamingPhase !== 'composing') {
+        this.host.setAppState({ streamingPhase: 'composing', streamingStartTime: Date.now() });
+      }
+      streamingUI.scheduleFlush();
+    } finally {
+      this.host.commitRenderBatch();
     }
-    streamingUI.scheduleFlush();
   }
 
   private handleToolProgress(event: ToolProgressEvent): void {
@@ -536,32 +561,37 @@ export class SessionEventHandler {
   }
 
   private handleToolResult(event: ToolResultEvent): void {
-    const { streamingUI } = this.host;
-    streamingUI.flushNow();
-    const resultData: ToolResultBlockData = {
-      tool_call_id: event.toolCallId,
-      output: serializeToolResultOutput(event.output),
-      is_error: event.isError,
-      synthetic: event.synthetic,
-    };
-    const matchedCall = streamingUI.completeToolResult(event.toolCallId, resultData);
-    this.subAgentEventHandler.handleAgentSwarmToolResult(
-      event.toolCallId,
-      resultData,
-      event.isError === true,
-    );
-    if (matchedCall !== undefined && matchedCall.name === 'TodoList' && !event.isError) {
-      const rawTodos = (matchedCall.args as { todos?: unknown }).todos;
-      if (Array.isArray(rawTodos)) {
-        const sanitized = rawTodos
-          .filter((todo): todo is { title: string; status: 'pending' | 'in_progress' | 'done' } =>
-            isTodoItemShape(todo),
-          )
-          .map((t) => ({ title: t.title, status: t.status }));
-        streamingUI.setTodoList(sanitized);
+    this.host.beginRenderBatch();
+    try {
+      const { streamingUI } = this.host;
+      streamingUI.flushNow();
+      const resultData: ToolResultBlockData = {
+        tool_call_id: event.toolCallId,
+        output: serializeToolResultOutput(event.output),
+        is_error: event.isError,
+        synthetic: event.synthetic,
+      };
+      const matchedCall = streamingUI.completeToolResult(event.toolCallId, resultData);
+      this.subAgentEventHandler.handleAgentSwarmToolResult(
+        event.toolCallId,
+        resultData,
+        event.isError === true,
+      );
+      if (matchedCall !== undefined && matchedCall.name === 'TodoList' && !event.isError) {
+        const rawTodos = (matchedCall.args as { todos?: unknown }).todos;
+        if (Array.isArray(rawTodos)) {
+          const sanitized = rawTodos
+            .filter((todo): todo is { title: string; status: 'pending' | 'in_progress' | 'done' } =>
+              isTodoItemShape(todo),
+            )
+            .map((t) => ({ title: t.title, status: t.status }));
+          streamingUI.setTodoList(sanitized);
+        }
       }
+      this.host.patchLivePane({ mode: 'waiting' });
+    } finally {
+      this.host.commitRenderBatch();
     }
-    this.host.patchLivePane({ mode: 'waiting' });
   }
 
   private handleStatusUpdate(event: AgentStatusUpdatedEvent): void {

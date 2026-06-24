@@ -1612,6 +1612,16 @@ export class KimiTUI {
     return { rows: this.state.ui.terminal.rows, columns: this.state.ui.terminal.columns };
   }
 
+  /** RenderBatchable — begins a render batch (SYNC ONLY). */
+  beginRenderBatch(): void {
+    this.renderTransaction.begin();
+  }
+
+  /** RenderBatchable — commits a render batch (SYNC ONLY). */
+  commitRenderBatch(): void {
+    this.renderTransaction.commit();
+  }
+
   showError(message: string): void {
     this.showStatus(`Error: ${message}`, 'error');
   }
