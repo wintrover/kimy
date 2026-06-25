@@ -1,7 +1,7 @@
 import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-type RenderEventType = 'request' | 'suppress' | 'commit' | 'flush' | 'bounds' | 'clamp';
+type RenderEventType = 'request' | 'suppress' | 'commit' | 'flush';
 
 interface RenderEvent {
   readonly ts: number;
@@ -155,7 +155,7 @@ export class RenderDiagnostics {
   async flush(timeoutMs = 2000): Promise<void> {
     await Promise.race([
       this.pendingWrite,
-      new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+      new Promise<void>((resolve) => { setTimeout(resolve, timeoutMs); }),
     ]);
   }
 

@@ -179,16 +179,14 @@ export class TabbedModelSelectorComponent extends Container implements Focusable
         } else {
           break;
         }
+      } else if (fits(start, end + 1, contentWidth + rightW)) {
+        contentWidth += rightW;
+        end++;
+      } else if (fits(start - 1, end, contentWidth + leftW)) {
+        contentWidth += leftW;
+        start--;
       } else {
-        if (fits(start, end + 1, contentWidth + rightW)) {
-          contentWidth += rightW;
-          end++;
-        } else if (fits(start - 1, end, contentWidth + leftW)) {
-          contentWidth += leftW;
-          start--;
-        } else {
-          break;
-        }
+        break;
       }
     }
 

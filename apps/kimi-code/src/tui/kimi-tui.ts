@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -46,7 +46,6 @@ import * as slashCommands from './commands/dispatch';
 import { BannerComponent } from './components/chrome/banner';
 import { DeviceCodeBoxComponent } from './components/chrome/device-code-box';
 import { GutterContainer } from './components/chrome/gutter-container';
-import { FOOTER_HEIGHT } from './components/chrome/footer';
 import { MoonLoader, type SpinnerStyle } from './components/chrome/moon-loader';
 import { WelcomeComponent } from './components/chrome/welcome';
 import {
@@ -224,13 +223,13 @@ export class KimiTUI {
   private readonly renderTransaction: RenderTransaction;
   private readonly renderDiagnostics: RenderDiagnostics | null;
   private isShuttingDown = false;
+  private alternateScreenActive = false;
   private readonly migrationPlan: MigrationPlan | null;
   private readonly migrateOnly: boolean;
   private startupNotice: string | undefined;
   private lastActivityMode: string | undefined;
   private currentActivityPane: ActivityPaneComponent | null = null;
   private lastHistoryContent: string | undefined;
-  private cachedChromeHeight = FOOTER_HEIGHT + 3; // footer(2) + editor(3) minimum
   readonly streamingUI: StreamingUIController;
   readonly authFlow: AuthFlowController;
   readonly btwPanelController: BtwPanelController;
@@ -304,10 +303,6 @@ export class KimiTUI {
         return;
       }
 
-      // Force render (resize): recalculate bounds before passing through
-      if (force) {
-        this.updateTranscriptBounds();
-      }
       // Normal path
       originalRequestRender(force);
     };
@@ -496,7 +491,35 @@ export class KimiTUI {
     return shouldReplayHistory;
   }
 
+  private installExitSafetyNet(): void {
+    // process.on('exit') fires on process.exit(), natural death, and unhandled
+    // exceptions — but NOT on bare signals.  SIGINT/SIGTERM are covered by the
+    // existing signal handlers which call process.exit() (→ triggers 'exit').
+    // writeSync is required because the 'exit' callback must be synchronous.
+    process.on('exit', () => {
+      if (this.alternateScreenActive) {
+        writeSync(process.stdout.fd, '\x1B[?1049l\x1B[?25h');
+      }
+    });
+
+    // SIGINT backup: in raw mode Ctrl+C is intercepted as a keypress, but if
+    // raw mode was never entered or was already restored, SIGINT is a signal.
+    process.prependListener('SIGINT', () => {
+      this.emergencyTerminalExit(130);
+    });
+  }
+
   private startEventLoop(): void {
+    // In TTY mode, switch to the alternate screen buffer so each render frame
+    // overwrites in place with zero scrollback accumulation.  In non-TTY mode
+    // (pipe, file redirect, CI) skip the escape sequences — they would leak
+    // raw bytes into the output.
+    if (process.stdout.isTTY) {
+      this.installExitSafetyNet();
+      process.stdout.write('\x1B[?1049h');
+      this.alternateScreenActive = true;
+    }
+
     this.state.ui.start();
     this.terminalFocusTrackingDispose = installTerminalFocusTracking(this.state);
     this.refreshTerminalThemeTracking();
@@ -674,6 +697,10 @@ export class KimiTUI {
     await this.renderDiagnostics?.flush().catch(() => {});
     await this.state.terminal.drainInput();
     this.state.ui.stop();
+    if (this.alternateScreenActive) {
+      process.stdout.write('\x1B[?1049l');
+      this.alternateScreenActive = false;
+    }
     if (this.onExit) {
       await this.onExit(exitCode);
     }
@@ -737,6 +764,10 @@ export class KimiTUI {
   private emergencyTerminalExit(exitCode = 129): never {
     this.isShuttingDown = true;
     this.unregisterSignalHandlers();
+    if (this.alternateScreenActive) {
+      writeSync(process.stdout.fd, '\x1B[?1049l\x1B[?25h');
+      this.alternateScreenActive = false;
+    }
     process.exit(exitCode);
   }
 
@@ -763,34 +794,22 @@ export class KimiTUI {
   // terminal — e.g. above the error when resuming a missing session. Mount it
   // only once init() succeeds. FooterComponent isn't a Container, so wrap it to
   // pick up the same outer gutter as the panels above.
+  //
+  // The footer is registered as an overlay (not a flow child) so it is pinned
+  // to the terminal bottom regardless of transcript length — exactly one
+  // instance, always at row `termHeight - FOOTER_HEIGHT`.
+  // mounting it at construction lets a stray pre-start render leak it to the
+  // terminal — e.g. above the error when resuming a missing session. Mount it
+  // only once init() succeeds. FooterComponent isn't a Container, so wrap it to
+  // pick up the same outer gutter as the panels above.
+  //
+  // In TTY mode, the alternate screen buffer prevents scrollback accumulation
+  // so the footer (last child) is always at the terminal bottom with no
+  // auto-scroll duplication.  In non-TTY mode, output is line-buffered.
   private mountFooter(): void {
     const footerWrap = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
     footerWrap.addChild(this.state.footer);
     this.state.ui.addChild(footerWrap);
-  }
-
-  /** Upper-bound estimate of all non-transcript chrome lines. */
-  private measureChromeHeight(): number {
-    let chrome = FOOTER_HEIGHT + 3; // footer(2) + editor(3 minimum)
-    if (this.currentActivityPane !== null) chrome += 2;
-    if (!this.state.todoPanel.isEmpty()) chrome += 8;
-    chrome += this.state.queuedMessages.length;
-    return chrome;
-  }
-
-  /** Clamp transcriptContainer maxHeight so it + chrome ≤ terminal.rows. */
-  private updateTranscriptBounds(): void {
-    const rows = this.state.terminal.rows;
-    const chromeHeight = this.cachedChromeHeight;
-    const maxHeight = Math.max(1, rows - chromeHeight);
-    this.state.transcriptContainer.setMaxHeight(maxHeight);
-    this.renderDiagnostics?.record({
-      type: 'bounds',
-      caller: `rows=${rows} chrome=${chromeHeight} maxH=${maxHeight}`,
-      force: false,
-      depth: 0,
-      suppressedCount: 0,
-    });
   }
 
   // =========================================================================
@@ -1096,7 +1115,6 @@ export class KimiTUI {
         this.updateQueueDisplay();
         this.sessionEventHandler.retryQueuedGoalPromotion();
       }
-      this.updateTranscriptBounds();
     } finally {
       this.renderTransaction.commit();
     }
@@ -1705,9 +1723,6 @@ export class KimiTUI {
     if (this.renderDiagnostics) {
       this.renderDiagnostics.setPostCommit();
     }
-    // Refresh chrome height cache for next frame (1-frame lag, imperceptible)
-    this.cachedChromeHeight = this.measureChromeHeight();
-    this.updateTranscriptBounds();
   }
 
   showError(message: string): void {

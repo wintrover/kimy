@@ -53,7 +53,7 @@ function maskInputLine(raw: string): string {
 
   // Protect ANSI escape sequences (reverse-video cursor, IME marker, etc.)
   // while masking every other visible character.
-  const parts = content.split(/(\x1B(?:\[[0-9;]*m|_pi:c\x07))/);
+  const parts = content.split(/(\u001B(?:\[[0-9;]*m|_pi:c\u0007))/);
   const maskedContent = parts
     .map((part, index) => {
       if (index % 2 === 1) return part; // ANSI sequence

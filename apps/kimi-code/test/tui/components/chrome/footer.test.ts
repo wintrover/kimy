@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FooterComponent } from '#/tui/components/chrome/footer';
 import { setRainbowDance, type RainbowDanceController } from '#/tui/easter-eggs/dance';
@@ -67,6 +67,7 @@ describe('FooterComponent', () => {
   afterEach(() => {
     chalk.level = previousChalkLevel;
     setRainbowDance(undefined);
+    vi.unstubAllEnvs();
   });
 
   it('paints the model name in rainbow while colored', () => {
@@ -102,5 +103,22 @@ describe('FooterComponent', () => {
     } finally {
       currentTheme.setPalette(darkColors);
     }
+  });
+
+  describe('render debug badge', () => {
+    it('is hidden when KIMI_CODE_RENDER_DEBUG is not set', () => {
+      vi.stubEnv('KIMI_CODE_RENDER_DEBUG', undefined);
+      const footer = new FooterComponent(appState);
+      const output = footer.render(120).join('\n');
+      expect(output).not.toMatch(/\[R:/);
+      expect(output).not.toMatch(/\[DUP:/);
+    });
+
+    it('is shown when KIMI_CODE_RENDER_DEBUG=1', () => {
+      vi.stubEnv('KIMI_CODE_RENDER_DEBUG', '1');
+      const footer = new FooterComponent(appState);
+      const output = footer.render(120).join('\n');
+      expect(output).toMatch(/\[R: \d+ \| TX: \d+ \| DUP: \d+\]/);
+    });
   });
 });

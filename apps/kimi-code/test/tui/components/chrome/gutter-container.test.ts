@@ -49,9 +49,10 @@ describe('GutterContainer', () => {
   });
 
   it('preserves ANSI sequences within child lines (only the leading pad is plain)', () => {
-    const colored = '[31mred[0m';
+    const colored = '\u001B[31mred\u001B[0m';
     const c = new GutterContainer(2, 2);
     c.addChild(new FakeChild(() => [colored]));
     expect(c.render(20)).toEqual([`  ${colored}`]);
   });
+
 });

@@ -778,6 +778,7 @@ export class StreamingUIController {
       children[idx] = group;
       state.transcriptContainer.invalidate();
     } else {
+      // eslint-disable-next-line no-console -- defensive fallback logging
       console.warn('[TUI] upgradeSoloAgentToGroup: solo component not found in transcript, skipping addChild to prevent duplicate');
     }
     group.attach(solo.toolCallView.id, solo);
@@ -835,6 +836,7 @@ export class StreamingUIController {
       children[idx] = group;
       state.transcriptContainer.invalidate();
     } else {
+      // eslint-disable-next-line no-console -- defensive fallback logging
       console.warn('[TUI] upgradeSoloReadToGroup: solo component not found in transcript, skipping addChild to prevent duplicate');
     }
     group.attach(solo.toolCallView.id, solo);
