@@ -230,18 +230,7 @@ function formatRenderDebugBadge(colors: ColorPalette): string | null {
   const diag = getDiagnostics();
   const violations = diag.getViolationCount();
 
-  // Violations always visible — no env var needed
-  if (violations > 0) {
-    const badge = chalk.hex(colors.warning)(`[DUP: ${String(violations)}]`);
-    if (!isRenderDebugEnabled()) return badge;
-    // With env var, show full badge even when violations > 0
-    const recorded = diag.totalRecorded;
-    const commits = diag.getEvents().filter((e) => e.type === 'commit').length;
-    const base = `[R: ${String(recorded)} | TX: ${String(commits)} | DUP: `;
-    return chalk.hex(colors.textDim)(base) + chalk.hex(colors.warning)(String(violations)) + chalk.hex(colors.textDim)(']');
-  }
-
-  // No violations — full badge only when env var is set
+  // Full badge only when env var is set
   if (!isRenderDebugEnabled()) return null;
   const recorded = diag.totalRecorded;
   const commits = diag.getEvents().filter((e) => e.type === 'commit').length;
