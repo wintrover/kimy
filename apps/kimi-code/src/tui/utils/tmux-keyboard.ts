@@ -47,7 +47,6 @@ function readTmuxOptionFromProcess(option: string): Promise<string | undefined> 
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      // eslint-disable-next-line promise/no-multiple-resolved -- guarded by `settled` flag above
       resolve(value);
     };
 

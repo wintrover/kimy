@@ -1,6 +1,5 @@
 import { Text } from '@earendil-works/pi-tui';
 import type { TUI } from '@earendil-works/pi-tui';
-import type { RenderTransaction } from '#/tui/render-transaction';
 
 import {
   BRAILLE_SPINNER_FRAMES,
@@ -23,7 +22,6 @@ export class MoonLoader extends Text {
 
   constructor(
     ui: TUI,
-    private readonly renderTransaction: RenderTransaction,
     style: SpinnerStyle = 'moon',
     colorFn?: (s: string) => string,
     label: string = '',
@@ -70,12 +68,7 @@ export class MoonLoader extends Text {
     const frame = this.frames[this.currentFrame]!;
     const coloredFrame = this.colorFn ? this.colorFn(frame) : frame;
     this.displayText = this.label ? `${coloredFrame} ${this.label}` : coloredFrame;
-
-    this.renderTransaction.begin();
-    try {
-      this.setText(this.displayText);
-    } finally {
-      this.renderTransaction.commit();
-    }
+    this.setText(this.displayText);
+    this.ui.requestRender({ preserveScroll: true });
   }
 }

@@ -8,5 +8,3 @@ packages:
 overrides:
   "ssh2@1.17.0>cpu-features": "-"
   "ssh2@1.17.0>nan": "-"
-patchedDependencies:
-  '@earendil-works/pi-tui@0.74.0': patches/@earendil-works__pi-tui@0.74.0.patch

@@ -103,9 +103,6 @@ function makeHost(options: { createGoalRejects?: boolean } = {}) {
     spliceTranscriptChildren: vi.fn(() => []),
     // TerminalSizable trait
     getTerminalSize: vi.fn(() => ({ rows: 24, columns: 80 })),
-    // RenderBatchable trait
-    beginRenderBatch: vi.fn(),
-    commitRenderBatch: vi.fn(),
   };
   host.setAppState.mockImplementation((patch: Record<string, unknown>) => {
     Object.assign(host.state.appState, patch);

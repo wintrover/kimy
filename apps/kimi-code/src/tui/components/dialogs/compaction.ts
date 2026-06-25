@@ -114,7 +114,7 @@ export class CompactionComponent extends Container {
     this.blinkTimer = setInterval(() => {
       this.blinkOn = !this.blinkOn;
       this.headerText.setText(this.buildHeader());
-      this.ui?.requestRender();
+      this.ui?.requestRender({ preserveScroll: true });
     }, BLINK_INTERVAL);
   }
 

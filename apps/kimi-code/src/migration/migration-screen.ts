@@ -11,8 +11,7 @@
  * This file implements the ask, progress, and result phases. `beginMigration`
  * drives the real runMigration flow (injectable for tests).
  */
-import { Container, truncateToWidth, type Focusable } from '@earendil-works/pi-tui';
-import { safeMatchesKey, Key } from '#/tui/utils/key-input-adapter';
+import { Container, matchesKey, Key, truncateToWidth, type Focusable } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
@@ -52,7 +51,7 @@ export interface MigrationScreenOptions {
   /** Called once the screen is finished; the host then restores the editor. */
   readonly onComplete: (result: MigrationScreenResult) => void;
   /** Triggers a re-render; the host wires this to `ui.requestRender()`. */
-  readonly requestRender?: (options?: { force?: boolean }) => void;
+  readonly requestRender?: () => void;
   /** Injectable for tests; defaults to the package's runMigration. */
   readonly runMigration?: (input: RunMigrationInput) => Promise<MigrationReport>;
   /**
@@ -182,7 +181,7 @@ export class MigrationScreenComponent extends Container implements Focusable {
       return;
     }
     if (this.phase === 'result') {
-      if (safeMatchesKey(data, Key.enter)) {
+      if (matchesKey(data, Key.enter)) {
         this.opts.onComplete({ decision: 'now', migrated: !this.migrationFailed });
       }
       return;
@@ -196,20 +195,20 @@ export class MigrationScreenComponent extends Container implements Focusable {
 
   private handleAskInput(data: string): void {
     const step = this.currentStep();
-    if (safeMatchesKey(data, Key.up)) {
+    if (matchesKey(data, Key.up)) {
       this.selectedIndex = Math.max(0, this.selectedIndex - 1);
       return;
     }
-    if (safeMatchesKey(data, Key.down)) {
+    if (matchesKey(data, Key.down)) {
       this.selectedIndex = Math.min(step.options.length - 1, this.selectedIndex + 1);
       return;
     }
-    if (safeMatchesKey(data, Key.escape)) {
+    if (matchesKey(data, Key.escape)) {
       // Esc anywhere in ask == "later"
       this.opts.onComplete({ decision: 'later' });
       return;
     }
-    if (safeMatchesKey(data, Key.enter)) {
+    if (matchesKey(data, Key.enter)) {
       const chosen = step.options[this.selectedIndex];
       if (chosen === undefined) return;
       this.advance(chosen.value);

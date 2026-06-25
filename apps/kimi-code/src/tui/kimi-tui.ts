@@ -1,4 +1,4 @@
-import { writeFileSync, writeSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -25,9 +25,6 @@ import { resolve } from 'pathe';
 import type { CLIOptions } from '#/cli/options';
 import { MigrationScreenComponent, type MigrationScreenResult } from '#/migration/index';
 import { appendInputHistory, loadInputHistory } from '#/utils/history/input-history';
-import { RenderTransaction } from '#/tui/render-transaction';
-import { captureCaller, getDiagnostics } from '#/tui/render-diagnostics';
-import type { RenderDiagnostics } from '#/tui/render-diagnostics';
 import { openUrl } from '#/utils/open-url';
 import { getInputHistoryFile } from '#/utils/paths';
 import { detectFdPath, ensureFdPath } from '#/utils/process/fd-detect';
@@ -220,15 +217,11 @@ export class KimiTUI {
   private terminalThemeTrackingDispose: (() => void) | undefined;
   private uninstallRainbowDance: () => void;
   private signalCleanupHandlers: Array<() => void> = [];
-  private readonly renderTransaction: RenderTransaction;
-  private readonly renderDiagnostics: RenderDiagnostics | null;
   private isShuttingDown = false;
-  private alternateScreenActive = false;
   private readonly migrationPlan: MigrationPlan | null;
   private readonly migrateOnly: boolean;
   private startupNotice: string | undefined;
   private lastActivityMode: string | undefined;
-  private currentActivityPane: ActivityPaneComponent | null = null;
   private lastHistoryContent: string | undefined;
   readonly streamingUI: StreamingUIController;
   readonly authFlow: AuthFlowController;
@@ -277,39 +270,6 @@ export class KimiTUI {
     this.migrateOnly = startupInput.migrateOnly ?? false;
     this.startupNotice = startupInput.startupNotice;
     this.state = createTUIState(tuiOptions);
-    this.renderDiagnostics = getDiagnostics();
-    const originalRequestRender = this.state.ui.requestRender.bind(this.state.ui);
-    this.state.ui.requestRender = (force?: boolean) => {
-      const depth = this.renderTransaction.getDepth();
-      const isStreaming = this.state.appState.streamingPhase !== 'idle';
-      const isCommitting = this.renderTransaction.isCommitting;
-
-      // Normal commit render — pass through
-      if (isCommitting) {
-        originalRequestRender(force);
-        return;
-      }
-
-      // Rendering outside transaction during streaming → gate block
-      if (isStreaming && depth === 0) {
-        const caller = captureCaller();
-        this.renderDiagnostics?.triggerAutoDump('Transaction Leak', caller);
-
-        if (process.env['NODE_ENV'] === 'development' || process.env['KIMI_CODE_RENDER_STRICT'] === '1') {
-          throw new Error(`Illegal Render: Attempted to render outside of a transaction. Caller: ${caller}`);
-        }
-        // Prod: defer to next tick
-        process.nextTick(() => originalRequestRender(force));
-        return;
-      }
-
-      // Normal path
-      originalRequestRender(force);
-    };
-    this.renderTransaction = new RenderTransaction(
-      this.state.ui,
-      this.renderDiagnostics,
-    );
     this.uninstallRainbowDance = installRainbowDance(() => {
       this.state.ui.requestRender();
     });
@@ -491,35 +451,7 @@ export class KimiTUI {
     return shouldReplayHistory;
   }
 
-  private installExitSafetyNet(): void {
-    // process.on('exit') fires on process.exit(), natural death, and unhandled
-    // exceptions — but NOT on bare signals.  SIGINT/SIGTERM are covered by the
-    // existing signal handlers which call process.exit() (→ triggers 'exit').
-    // writeSync is required because the 'exit' callback must be synchronous.
-    process.on('exit', () => {
-      if (this.alternateScreenActive) {
-        writeSync(process.stdout.fd, '\x1B[?1049l\x1B[?25h');
-      }
-    });
-
-    // SIGINT backup: in raw mode Ctrl+C is intercepted as a keypress, but if
-    // raw mode was never entered or was already restored, SIGINT is a signal.
-    process.prependListener('SIGINT', () => {
-      this.emergencyTerminalExit(130);
-    });
-  }
-
   private startEventLoop(): void {
-    // In TTY mode, switch to the alternate screen buffer so each render frame
-    // overwrites in place with zero scrollback accumulation.  In non-TTY mode
-    // (pipe, file redirect, CI) skip the escape sequences — they would leak
-    // raw bytes into the output.
-    if (process.stdout.isTTY) {
-      this.installExitSafetyNet();
-      process.stdout.write('\x1B[?1049h');
-      this.alternateScreenActive = true;
-    }
-
     this.state.ui.start();
     this.terminalFocusTrackingDispose = installTerminalFocusTracking(this.state);
     this.refreshTerminalThemeTracking();
@@ -694,13 +626,8 @@ export class KimiTUI {
     await this.harness.close();
     this.sessionEventHandler.stopAllMcpServerStatusSpinners();
     this.uninstallRainbowDance();
-    await this.renderDiagnostics?.flush().catch(() => {});
     await this.state.terminal.drainInput();
     this.state.ui.stop();
-    if (this.alternateScreenActive) {
-      process.stdout.write('\x1B[?1049l');
-      this.alternateScreenActive = false;
-    }
     if (this.onExit) {
       await this.onExit(exitCode);
     }
@@ -764,10 +691,6 @@ export class KimiTUI {
   private emergencyTerminalExit(exitCode = 129): never {
     this.isShuttingDown = true;
     this.unregisterSignalHandlers();
-    if (this.alternateScreenActive) {
-      writeSync(process.stdout.fd, '\x1B[?1049l\x1B[?25h');
-      this.alternateScreenActive = false;
-    }
     process.exit(exitCode);
   }
 
@@ -794,18 +717,6 @@ export class KimiTUI {
   // terminal — e.g. above the error when resuming a missing session. Mount it
   // only once init() succeeds. FooterComponent isn't a Container, so wrap it to
   // pick up the same outer gutter as the panels above.
-  //
-  // The footer is registered as an overlay (not a flow child) so it is pinned
-  // to the terminal bottom regardless of transcript length — exactly one
-  // instance, always at row `termHeight - FOOTER_HEIGHT`.
-  // mounting it at construction lets a stray pre-start render leak it to the
-  // terminal — e.g. above the error when resuming a missing session. Mount it
-  // only once init() succeeds. FooterComponent isn't a Container, so wrap it to
-  // pick up the same outer gutter as the panels above.
-  //
-  // In TTY mode, the alternate screen buffer prevents scrollback accumulation
-  // so the footer (last child) is always at the terminal bottom with no
-  // auto-scroll duplication.  In non-TTY mode, output is line-buffered.
   private mountFooter(): void {
     const footerWrap = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
     footerWrap.addChild(this.state.footer);
@@ -1105,40 +1016,28 @@ export class KimiTUI {
   setAppState(patch: Partial<AppState>): void {
     if (!hasPatchChanges(this.state.appState, patch)) return;
     const busyChanged = 'streamingPhase' in patch || 'isCompacting' in patch;
-    this.renderTransaction.begin();
-    try {
-      Object.assign(this.state.appState, patch);
-      if ('planMode' in patch) this.updateEditorBorderHighlight();
-      this.state.footer.setState(this.state.appState);
-      this.updateActivityPane();
-      if (busyChanged) {
-        this.updateQueueDisplay();
-        this.sessionEventHandler.retryQueuedGoalPromotion();
-      }
-    } finally {
-      this.renderTransaction.commit();
+    Object.assign(this.state.appState, patch);
+    if ('planMode' in patch) this.updateEditorBorderHighlight();
+    this.state.footer.setState(this.state.appState);
+    this.updateActivityPane();
+    if (busyChanged) {
+      this.updateQueueDisplay();
+      this.sessionEventHandler.retryQueuedGoalPromotion();
     }
+    this.state.ui.requestRender();
   }
 
   patchLivePane(patch: Partial<LivePaneState>): void {
     if (!hasPatchChanges(this.state.livePane, patch)) return;
-    this.renderTransaction.begin();
-    try {
-      Object.assign(this.state.livePane, patch);
-      this.updateActivityPane();
-    } finally {
-      this.renderTransaction.commit();
-    }
+    Object.assign(this.state.livePane, patch);
+    this.updateActivityPane();
+    this.state.ui.requestRender();
   }
 
   resetLivePane(): void {
-    this.renderTransaction.begin();
-    try {
-      this.state.livePane = { ...INITIAL_LIVE_PANE };
-      this.updateActivityPane();
-    } finally {
-      this.renderTransaction.commit();
-    }
+    this.state.livePane = { ...INITIAL_LIVE_PANE };
+    this.updateActivityPane();
+    this.state.ui.requestRender();
   }
 
   // =========================================================================
@@ -1619,7 +1518,7 @@ export class KimiTUI {
 
   createMcpStatusSpinner(label: string): MoonLoader {
     const tint = (s: string): string => currentTheme.fg('textMuted', s);
-    const spinner = new MoonLoader(this.state.ui, this.renderTransaction, 'braille', tint, label);
+    const spinner = new MoonLoader(this.state.ui, 'braille', tint, label);
     this.state.transcriptContainer.addChild(spinner);
     this.state.ui.requestRender();
     return spinner;
@@ -1697,34 +1596,6 @@ export class KimiTUI {
     return { rows: this.state.ui.terminal.rows, columns: this.state.ui.terminal.columns };
   }
 
-  /** RenderBatchable — begins a render batch (SYNC ONLY). */
-  beginRenderBatch(): void {
-    this.renderTransaction.begin();
-  }
-
-  /** RenderBatchable — commits a render batch (SYNC ONLY). */
-  commitRenderBatch(): void {
-    // Auto-flush all dirty streaming buffers before the outermost commit.
-    // We're still inside the transaction (requestRender suppressed),
-    // so flush → component.updateContent → requestRender is safe.
-    // This ensures the single commit render includes the latest text.
-    if (this.renderTransaction.getDepth() === 1) {
-      this.renderDiagnostics?.record({
-        type: 'flush',
-        caller: 'commitRenderBatch',
-        force: false,
-        depth: 1,
-        suppressedCount: 0,
-      });
-      this.streamingUI.flushNow();
-    }
-    this.renderTransaction.commit();
-    // Frame Multiplication detection — tick boundary marker
-    if (this.renderDiagnostics) {
-      this.renderDiagnostics.setPostCommit();
-    }
-  }
-
   showError(message: string): void {
     this.showStatus(`Error: ${message}`, 'error');
   }
@@ -1735,7 +1606,7 @@ export class KimiTUI {
 
   showProgressSpinner(label: string): LoginProgressSpinnerHandle {
     const tint = (s: string): string => currentTheme.fg('primary', s);
-    const spinner = new MoonLoader(this.state.ui, this.renderTransaction, 'braille', tint, label);
+    const spinner = new MoonLoader(this.state.ui, 'braille', tint, label);
     this.state.transcriptContainer.addChild(new Spacer(1));
     this.state.transcriptContainer.addChild(spinner);
     this.state.ui.requestRender();
@@ -1785,10 +1656,10 @@ export class KimiTUI {
     }
 
     this.lastActivityMode = activityModeKey;
+    this.state.activityContainer.clear();
 
     switch (effectiveMode) {
       case 'hidden':
-        this.clearActivityPane();
         this.stopActivitySpinner();
         this.syncAgentSwarmActivitySpinner(undefined);
         this.state.ui.requestRender();
@@ -1796,15 +1667,16 @@ export class KimiTUI {
       case 'waiting': {
         const spinner = this.ensureActivitySpinner('moon');
         this.syncAgentSwarmActivitySpinner(placeSpinnerInAgentSwarm ? spinner : undefined);
-        if (placeSpinnerInAgentSwarm) {
-          this.clearActivityPane();
-          break;
-        }
-        this.syncActivityPane('waiting', spinner);
+        if (placeSpinnerInAgentSwarm) break;
+        this.state.activityContainer.addChild(
+          new ActivityPaneComponent({
+            mode: 'waiting',
+            spinner,
+          }),
+        );
         break;
       }
       case 'thinking': {
-        this.clearActivityPane();
         this.stopActivitySpinner();
         this.syncAgentSwarmActivitySpinner(undefined);
         break;
@@ -1814,45 +1686,34 @@ export class KimiTUI {
           currentTheme.fg('primary', s),
         );
         this.syncAgentSwarmActivitySpinner(undefined);
-        this.syncActivityPane('composing', spinner);
+        this.state.activityContainer.addChild(
+          new ActivityPaneComponent({
+            mode: 'composing',
+            spinner,
+          }),
+        );
         break;
       }
       case 'tool': {
         const spinner = this.ensureActivitySpinner('moon');
         this.syncAgentSwarmActivitySpinner(placeSpinnerInAgentSwarm ? spinner : undefined);
-        if (placeSpinnerInAgentSwarm) {
-          this.clearActivityPane();
-          break;
-        }
-        this.syncActivityPane('tool', spinner);
+        if (placeSpinnerInAgentSwarm) break;
+        this.state.activityContainer.addChild(
+          new ActivityPaneComponent({
+            mode: 'tool',
+            spinner,
+          }),
+        );
         break;
       }
       case 'idle':
       case 'session': {
-        this.clearActivityPane();
         this.stopActivitySpinner();
         this.syncAgentSwarmActivitySpinner(undefined);
         break;
       }
     }
     this.state.ui.requestRender();
-  }
-
-  private syncActivityPane(mode: ActivityPaneMode, spinner: MoonLoader): void {
-    if (this.currentActivityPane !== null) {
-      this.currentActivityPane.updateMode(mode, spinner);
-    } else {
-      const pane = new ActivityPaneComponent({ mode, spinner });
-      this.currentActivityPane = pane;
-      this.state.activityContainer.addChild(pane);
-    }
-  }
-
-  private clearActivityPane(): void {
-    if (this.currentActivityPane !== null) {
-      this.state.activityContainer.clear();
-      this.currentActivityPane = null;
-    }
   }
 
   private resolveActivityPaneMode(): EffectiveActivityPaneMode {
@@ -1982,7 +1843,7 @@ export class KimiTUI {
     }
 
     if (this.state.activitySpinner === null) {
-      const instance = new MoonLoader(this.state.ui, this.renderTransaction, style, colorFn, label);
+      const instance = new MoonLoader(this.state.ui, style, colorFn, label);
       this.state.activitySpinner = { instance, style };
       return instance;
     }

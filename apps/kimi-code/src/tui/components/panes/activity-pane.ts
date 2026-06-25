@@ -10,36 +10,20 @@ export interface ActivityPaneOptions {
 }
 
 export class ActivityPaneComponent extends Container {
-  private mode: ActivityPaneMode;
-  private spinner?: MoonLoader;
-
   constructor(options: ActivityPaneOptions) {
     super();
-    this.mode = options.mode;
-    this.spinner = options.spinner;
-    this.applyMode();
-  }
 
-  updateMode(mode: ActivityPaneMode, spinner?: MoonLoader): void {
-    this.mode = mode;
-    this.spinner = spinner;
-    this.clear();
-    this.applyMode();
-    this.invalidate();
-  }
-
-  private applyMode(): void {
-    if (this.mode === 'waiting' || this.mode === 'tool') {
-      if (this.spinner !== undefined) {
+    if (options.mode === 'waiting' || options.mode === 'tool') {
+      if (options.spinner !== undefined) {
         this.addChild(new Spacer(1));
-        this.addChild(this.spinner);
+        this.addChild(options.spinner);
       }
       return;
     }
 
-    if (this.mode === 'composing' && this.spinner !== undefined) {
+    if (options.mode === 'composing' && options.spinner !== undefined) {
       this.addChild(new Spacer(1));
-      this.addChild(this.spinner);
+      this.addChild(options.spinner);
     }
   }
 }

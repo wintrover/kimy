@@ -889,7 +889,7 @@ export class ToolCallComponent extends Container {
         return;
       }
       this.rebuildBody();
-      this.ui?.requestRender();
+      this.ui?.requestRender({ preserveScroll: true });
     }, STREAMING_PROGRESS_INTERVAL_MS);
   }
 
@@ -919,7 +919,7 @@ export class ToolCallComponent extends Container {
       this.headerText.setText(this.buildHeader());
       this.invalidate();
       this.notifySnapshotChange();
-      this.ui?.requestRender();
+      this.ui?.requestRender({ preserveScroll: true });
     }, SUBAGENT_ELAPSED_INTERVAL_MS);
   }
 

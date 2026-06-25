@@ -4,7 +4,6 @@ import { pathToFileURL } from 'node:url';
 
 import type { Session } from '@moonshot-ai/kimi-code-sdk';
 
-import { getDiagnostics } from '#/tui/render-diagnostics';
 import { detectInstallSource } from '#/cli/update/source';
 import { detectShellEnvironment } from '#/utils/process/shell-env';
 import { toTerminalHyperlink } from '#/utils/terminal-hyperlink';
@@ -151,12 +150,6 @@ export async function handleExportDebugZipCommand(host: SlashCommandHost): Promi
       includeGlobalLog: true,
     });
     const linked = toTerminalHyperlink(result.zipPath, pathToFileURL(result.zipPath).href);
-    const diagnostics = getDiagnostics();
-    if (diagnostics.totalRecorded > 0) {
-      const renderLogPath = await diagnostics.dumpToFile();
-      host.showNotice('Export complete + render log saved', `${linked}\nRender log: ${renderLogPath}`);
-      return;
-    }
     host.showNotice('Export complete', linked);
   } catch (error) {
     const msg = formatErrorMessage(error);

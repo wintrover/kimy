@@ -57,45 +57,4 @@ describe('RenderTransaction', () => {
     tx.commit();
     expect(ui.requestRender).toHaveBeenCalledOnce();
   });
-
-  describe('isCommitting', () => {
-    it('is false by default', () => {
-      const ui = createMockUI();
-      const tx = new RenderTransaction(ui);
-      expect(tx.isCommitting).toBe(false);
-    });
-
-    it('is true during the commit callback window', () => {
-      const ui = createMockUI();
-      const tx = new RenderTransaction(ui);
-
-      let commitRenderSeen = false;
-      ui.requestRender = vi.fn(() => {
-        // Inside the commit flush callback, isCommitting should be true
-        expect(tx.isCommitting).toBe(true);
-        commitRenderSeen = true;
-      });
-
-      tx.begin();
-      // Trigger a pending render
-      (ui as unknown as { requestRender: () => void }).requestRender();
-
-      tx.commit();
-
-      expect(commitRenderSeen).toBe(true);
-      // After commit completes, isCommitting should be false again
-      expect(tx.isCommitting).toBe(false);
-    });
-
-    it('is false after commit when nothing was pending', () => {
-      const ui = createMockUI();
-      const tx = new RenderTransaction(ui);
-
-      tx.begin();
-      // No requestRender call inside transaction
-      tx.commit();
-
-      expect(tx.isCommitting).toBe(false);
-    });
-  });
 });

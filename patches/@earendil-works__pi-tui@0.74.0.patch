@@ -6,7 +6,7 @@ index 8394d46..6b46f4a 100644
      removeInputListener(listener: InputListener): void;
      private queryCellSize;
      stop(): void;
-+    requestRender(options?: { force?: boolean }): void;
++    requestRender(options?: { force?: boolean; preserveScroll?: boolean }): void;
      requestRender(force?: boolean): void;
      private scheduleRender;
      private handleInput;
@@ -14,17 +14,6 @@ diff --git a/dist/tui.js b/dist/tui.js
 index b521ceb..5a3c0ac 100644
 --- a/dist/tui.js
 +++ b/dist/tui.js
-@@ -283,9 +283,9 @@ export class TUI extends Container {
-         for (const overlay of this.overlayStack)
-             overlay.component.invalidate?.();
-     }
-     start() {
-         this.stopped = false;
--        this.terminal.start((data) => this.handleInput(data), () => this.requestRender());
-+        this.terminal.start((data) => this.handleInput(data), () => this.requestRender({ force: true }));
-         this.terminal.hideCursor();
-         this.queryCellSize();
-         this.requestRender();
 @@ -327,7 +327,11 @@ export class TUI extends Container {
          this.terminal.showCursor();
          this.terminal.stop();
