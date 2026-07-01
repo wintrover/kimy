@@ -43,6 +43,8 @@ vi.mock('#/tui/commands/prompts', async (importOriginal) => {
   return { ...actual, promptFeedbackInput: vi.fn() };
 });
 
+vi.mock('#/utils/open-url', () => ({ openUrl: vi.fn() }));
+
 const ESC = String.fromCodePoint(0x1b);
 const BEL = String.fromCodePoint(0x07);
 

@@ -396,6 +396,7 @@ function _typeOnlyChecks(): void {
     thinking: false,
     tool_use: true,
     max_context_tokens: 200000,
+    max_output_tokens: 0,
   };
   const _llmCapability: ModelCapability | undefined = _llm.capability;
   void capability;

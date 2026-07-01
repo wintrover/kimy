@@ -28,6 +28,7 @@ describe('ModelCapability / UNKNOWN_CAPABILITY', () => {
       thinking: true,
       tool_use: true,
       max_context_tokens: 128_000,
+      max_output_tokens: 0,
     };
     expect(cap.image_in).toBe(true);
     expect(cap.max_context_tokens).toBe(128_000);
@@ -56,6 +57,7 @@ describe('ModelCapability / UNKNOWN_CAPABILITY', () => {
       thinking: false,
       tool_use: false,
       max_context_tokens: 0,
+      max_output_tokens: 0,
     };
     expect(isUnknownCapability(UNKNOWN_CAPABILITY)).toBe(true);
     expect(isUnknownCapability(copiedUnknown)).toBe(true);

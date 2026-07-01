@@ -47,6 +47,8 @@ export interface KimiOptions {
   defaultHeaders?: Record<string, string> | undefined;
   generationKwargs?: GenerationKwargs | undefined;
   clientFactory?: (auth: ProviderRequestAuth) => OpenAI;
+  /** Provider-level infra ceiling for output tokens (safety net for unknown models). */
+  defaultMaxTokens?: number | undefined;
 }
 
 export interface GenerationKwargs {
@@ -367,6 +369,7 @@ export class KimiChatProvider implements ChatProvider {
   private _client: OpenAI | undefined;
   private _clientFactory: ((auth: ProviderRequestAuth) => OpenAI) | undefined;
   private _files: KimiFiles | undefined;
+  private _defaultMaxTokens: number | undefined;
 
   constructor(options: KimiOptions) {
     const apiKey = options.apiKey ?? process.env['KIMI_API_KEY'];
@@ -377,6 +380,7 @@ export class KimiChatProvider implements ChatProvider {
     this._model = options.model;
     this._stream = options.stream ?? true;
     this._generationKwargs = { ...options.generationKwargs };
+    this._defaultMaxTokens = options.defaultMaxTokens;
     this._client =
       this._apiKey === undefined
         ? undefined

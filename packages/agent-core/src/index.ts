@@ -44,7 +44,7 @@ export type {
   QuestionBackgroundTaskInfo,
 } from './agent/background';
 export type { ToolServices } from './tools/support/services';
-export { SingleModelProvider } from './session/provider-manager';
+export { SingleModelProvider, PROVIDER_INFRA_CONSTRAINTS } from './session/provider-manager';
 export type {
   BearerTokenProvider,
   ModelProvider,
@@ -96,6 +96,9 @@ export * from './di';
 // consumers like `services/src/event/event.ts` while letting new code reach
 // for the emitter type without naming clashes.
 export { Emitter } from './base/common/event';
+
+// ─── Provider constraint overrides ───────────────────────────────────────────
+export { setRuntimeConstraintOverrides, getRuntimeConstraintOverrides } from './utils/infra-overrides';
 
 // ─── In-process services (merged from @moonshot-ai/services) ─────────────────
 // Re-exports the `IXxxService` contracts, default `XxxService` implementations,

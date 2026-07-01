@@ -11,6 +11,7 @@ import type { EnabledPluginSessionStart } from '#/plugin';
 
 import type { McpConnectionManager } from '../mcp';
 import { FlagResolver, type ExperimentalFlagResolver } from '../flags';
+import { persistLearnedConstraint, setRuntimeConstraintOverrides } from '#/utils/infra-overrides';
 import type { PreparedSystemPromptContext, ResolvedAgentProfile } from '../profile';
 import type { ModelProvider } from '../session/provider-manager';
 import type { SessionSubagentHost } from '../session/subagent-host';
@@ -300,6 +301,21 @@ export class Agent {
       this.replayBuilder.postRestoring = false;
     }
     return result;
+  }
+
+  /**
+   * Learn a provider-level output limit from a runtime error and persist it.
+   *
+   * 1. Immediately updates in-memory overrides so subsequent requests cap output.
+   * 2. Writes the constraint to disk (`infra-overrides.json`) via atomicWrite
+   *    so the next session starts with the learned limit already in place.
+   */
+  async learnProviderConstraint(providerId: string, outputLimit: number): Promise<void> {
+    setRuntimeConstraintOverrides({ [providerId]: { output: outputLimit } });
+    if (this.homedir) {
+      await persistLearnedConstraint(this.homedir, providerId, outputLimit);
+    }
+    this.log.info('learned provider output constraint', { providerId, outputLimit });
   }
 
   get rpcMethods(): PromisableMethods<AgentAPI> {

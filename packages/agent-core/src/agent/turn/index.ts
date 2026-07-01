@@ -800,6 +800,24 @@ export class TurnFlow {
           await this.agent.fullCompaction.handleOverflowError(signal, error);
           continue; // Retry with compacted context
         }
+        // Output limit exceeded (e.g. max_tokens must be <= 4096).
+        // Learn the limit and retry — no compaction needed.
+        if (
+          error instanceof APIStatusError &&
+          error.statusCode === 400 &&
+          (error as unknown as { learnedOutputLimit?: number }).learnedOutputLimit !== undefined
+        ) {
+          const limit = (error as unknown as { learnedOutputLimit: number }).learnedOutputLimit;
+          const modelAlias = this.agent.config.modelAlias;
+          if (modelAlias) {
+            const resolved = this.agent.modelProvider?.resolveProviderConfig(modelAlias);
+            const providerId = resolved?.providerName;
+            if (providerId) {
+              await this.agent.learnProviderConstraint?.(providerId, limit);
+            }
+          }
+          continue; // Retry with new output cap applied
+        }
         if (isMaxStepsExceededError(error)) {
           this.agent.log.warn('turn hit max steps', {
             turnId,

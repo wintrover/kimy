@@ -1,3 +1,4 @@
+import type { ModelCapability } from '#/capability';
 import type { ContentPart, Message, StreamedMessagePart, ToolCall } from '#/message';
 import type {
   ChatProvider,
@@ -77,6 +78,10 @@ export interface OpenAILegacyOptions {
   defaultHeaders?: Record<string, string>;
   toolMessageConversion?: ToolMessageConversion | undefined;
   clientFactory?: (auth: ProviderRequestAuth) => OpenAI;
+  /** Declared model capability from the registry (e.g. thinking, max_output_tokens). */
+  capability?: ModelCapability | undefined;
+  /** Provider-level infra ceiling for output tokens (safety net for unknown models). */
+  defaultMaxTokens?: number | undefined;
 }
 
 export interface OpenAILegacyGenerationKwargs {
@@ -137,13 +142,20 @@ function convertMessage(
   message: Message,
   reasoningKey: string | undefined,
   toolMessageConversion: ToolMessageConversion,
+  capability?: ModelCapability,
 ): OpenAIMessage {
   let reasoningContent = '';
   const nonThinkParts: ContentPart[] = [];
 
   for (const part of message.content) {
     if (part.type === 'think') {
-      reasoningContent += part.think;
+      if (capability?.thinking === false) {
+        // Non-thinking model: serialize ThinkPart as plain text instead of
+        // the reasoning_content wire field to avoid provider rejection.
+        nonThinkParts.push({ type: 'text', text: `[Thinking] ${part.think}\n[/Thinking]` });
+      } else {
+        reasoningContent += part.think;
+      }
     } else {
       nonThinkParts.push(part);
     }
@@ -274,6 +286,7 @@ function convertHistoryMessages(
   history: readonly Message[],
   reasoningKey: string | undefined,
   toolMessageConversion: ToolMessageConversion,
+  capability?: ModelCapability,
 ): OpenAIMessage[] {
   const messages: OpenAIMessage[] = [];
   const pendingToolResultMedia: OpenAIContentPart[] = [];
@@ -282,7 +295,7 @@ function convertHistoryMessages(
     if (msg.role !== 'tool') {
       appendToolResultMediaMessage(messages, pendingToolResultMedia);
     }
-    messages.push(convertMessage(msg, reasoningKey, toolMessageConversion));
+    messages.push(convertMessage(msg, reasoningKey, toolMessageConversion, capability));
     if (msg.role === 'tool') {
       pendingToolResultMedia.push(...toolResultImageParts(msg));
     }
@@ -448,6 +461,8 @@ export class OpenAILegacyChatProvider implements ChatProvider {
   private _reasoningEffort: string | undefined;
   private _generationKwargs: OpenAILegacyGenerationKwargs;
   private _toolMessageConversion: ToolMessageConversion;
+  private _capability: ModelCapability | undefined;
+  private _defaultMaxTokens: number | undefined;
   private _client: OpenAI | undefined;
   private _httpClient: unknown;
   private _clientFactory: ((auth: ProviderRequestAuth) => OpenAI) | undefined;
@@ -473,6 +488,8 @@ export class OpenAILegacyChatProvider implements ChatProvider {
     this._generationKwargs =
       options.maxTokens !== undefined ? completionTokenKwargs(this._model, options.maxTokens) : {};
     this._toolMessageConversion = options.toolMessageConversion ?? null;
+    this._capability = options.capability;
+    this._defaultMaxTokens = options.defaultMaxTokens;
     this._httpClient = options.httpClient;
     this._clientFactory = options.clientFactory;
 
@@ -510,7 +527,7 @@ export class OpenAILegacyChatProvider implements ChatProvider {
       OPENAI_CHAT_TOOL_CALL_ID_POLICY,
     );
     messages.push(
-      ...convertHistoryMessages(normalizedHistory, this._reasoningKey, this._toolMessageConversion),
+      ...convertHistoryMessages(normalizedHistory, this._reasoningKey, this._toolMessageConversion, this._capability),
     );
 
     const kwargs: Record<string, unknown> = normalizeGenerationKwargs(
@@ -531,12 +548,14 @@ export class OpenAILegacyChatProvider implements ChatProvider {
     // (e.g. One API) that require reasoning_effort when messages contain reasoning_content.
     // Skip when the caller already pinned reasoning_effort via withGenerationKwargs —
     // their value would otherwise be silently overwritten below.
+    // Skip for non-thinking models: sending reasoning_effort to a model that
+    // does not support it will trigger a provider validation error.
     // See: https://github.com/MoonshotAI/kimi-code/issues/1616
     if (reasoningEffort === undefined && kwargs['reasoning_effort'] === undefined) {
       const hasThinkPart = history.some((message) =>
         message.content.some((part) => part.type === 'think'),
       );
-      if (hasThinkPart) {
+      if (hasThinkPart && this._capability?.thinking !== false) {
         reasoningEffort = 'medium';
       }
     }
@@ -546,6 +565,30 @@ export class OpenAILegacyChatProvider implements ChatProvider {
       if (kwargs[key] === undefined) {
         // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
         delete kwargs[key];
+      }
+    }
+
+    // 2-Layer auto-clamping of the completion token budget.
+    // Applied after normalisation so we operate on the final field name
+    // (max_completion_tokens for reasoning models, max_tokens otherwise).
+    {
+      const tokenKey = usesMaxCompletionTokens(this._model)
+        ? 'max_completion_tokens'
+        : 'max_tokens';
+      const currentValue = kwargs[tokenKey] as number | undefined;
+      if (currentValue !== undefined && currentValue > 0) {
+        let clamped = currentValue;
+        // Layer 1: Capability registry ceiling (known models).
+        const capabilityMaxOutput = this._capability?.max_output_tokens ?? 0;
+        if (capabilityMaxOutput > 0) {
+          clamped = Math.min(clamped, capabilityMaxOutput);
+        }
+        // Layer 2: Provider infra ceiling (unknown models safety net).
+        const providerInfraLimit = this._defaultMaxTokens ?? 0;
+        if (providerInfraLimit > 0) {
+          clamped = Math.min(clamped, providerInfraLimit);
+        }
+        kwargs[tokenKey] = clamped;
       }
     }
 
@@ -583,6 +626,12 @@ export class OpenAILegacyChatProvider implements ChatProvider {
 
   withThinking(effort: ThinkingEffort): OpenAILegacyChatProvider {
     const clone = this._clone();
+    // Thinking guard: non-thinking models ignore all thinking requests to
+    // avoid sending unsupported reasoning_effort to the provider.
+    if (this._capability?.thinking === false) {
+      clone._reasoningEffort = undefined;
+      return clone;
+    }
     if (effort === 'off') {
       clone._reasoningEffort = undefined;
     } else if (clone._configReasoningEffort) {

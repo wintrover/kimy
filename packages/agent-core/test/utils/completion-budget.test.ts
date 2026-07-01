@@ -7,7 +7,7 @@ import {
   resolveCompletionBudget,
 } from '../../src/utils/completion-budget';
 
-function makeCapability(maxContextTokens: number): ModelCapability {
+function makeCapability(maxContextTokens: number, maxOutputTokens: number = 0): ModelCapability {
   return {
     image_in: false,
     video_in: false,
@@ -15,6 +15,7 @@ function makeCapability(maxContextTokens: number): ModelCapability {
     thinking: false,
     tool_use: true,
     max_context_tokens: maxContextTokens,
+    max_output_tokens: maxOutputTokens,
   };
 }
 
@@ -50,20 +51,22 @@ describe('computeCompletionBudgetCap', () => {
     ).toBe(1);
   });
 
-  it('uses the model context window when no hard cap is set', () => {
+  it('uses fallback when no hard cap and max_output_tokens is zero', () => {
     const maxCtx = 100000;
     const cap = computeCompletionBudgetCap({
       budget: { fallback: 32000 },
       capability: makeCapability(maxCtx),
     });
-    expect(cap).toBe(maxCtx);
+    // maxCtx is a ceiling only; since max_output_tokens is 0, the fallback is used.
+    expect(cap).toBe(32000);
   });
 
-  it('uses the explicit hard cap when configured', () => {
+  it('uses the explicit hard cap when configured (clamped by context window)', () => {
     const cap = computeCompletionBudgetCap({
       budget: { hardCap: 32000 },
-      capability: makeCapability(10000),
+      capability: makeCapability(48000),
     });
+    // hardCap (32000) is smaller than maxCtx (48000), so hardCap is the result.
     expect(cap).toBe(32000);
   });
 

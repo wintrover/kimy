@@ -6,6 +6,7 @@ import {
   APIStatusError,
   APITimeoutError,
   ChatProviderError,
+  isOutputLimitError,
   isProviderRateLimitError,
   isRetryableGenerateError,
   normalizeAPIStatusError,
@@ -204,6 +205,36 @@ describe('normalizeAPIStatusError', () => {
     [400, 'max tokens must not exceed the configured output limit'],
   ])('keeps %i "%s" as APIStatusError', (statusCode, message) => {
     const error = normalizeAPIStatusError(statusCode, message);
+    expect(error).toBeInstanceOf(APIStatusError);
+    expect(error).not.toBeInstanceOf(APIContextOverflowError);
+  });
+});
+
+describe('parseOutputLimitFromMessage / isOutputLimitError', () => {
+  it('detects "max_tokens must be less than or equal to 4096" as output limit error', () => {
+    expect(isOutputLimitError(400, 'max_tokens must be less than or equal to 4096')).toBe(true);
+    const error = normalizeAPIStatusError(400, 'max_tokens must be less than or equal to 4096');
+    expect((error as any).learnedOutputLimit).toBe(4096);
+  });
+
+  it('detects "max_completion_tokens (393216 > 262144)" as output limit error', () => {
+    expect(isOutputLimitError(400, 'max_completion_tokens (393216 > 262144)')).toBe(true);
+    const error = normalizeAPIStatusError(400, 'max_completion_tokens (393216 > 262144)');
+    expect((error as any).learnedOutputLimit).toBe(262144);
+  });
+
+  it('returns false for non-output-limit errors', () => {
+    expect(isOutputLimitError(400, 'Bad request')).toBe(false);
+    const error = normalizeAPIStatusError(400, 'Bad request');
+    expect((error as any).learnedOutputLimit).toBeUndefined();
+  });
+
+  it('returns false for wrong status code even with matching message', () => {
+    expect(isOutputLimitError(500, 'max_tokens must be less than or equal to 4096')).toBe(false);
+  });
+
+  it('still classifies output limit error as APIStatusError (not APIContextOverflowError)', () => {
+    const error = normalizeAPIStatusError(400, 'max_tokens must be less than or equal to 4096');
     expect(error).toBeInstanceOf(APIStatusError);
     expect(error).not.toBeInstanceOf(APIContextOverflowError);
   });

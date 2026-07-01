@@ -56,12 +56,13 @@ export function computeCompletionBudgetCap(args: {
   readonly capability: ModelCapability | undefined;
 }): number {
   const maxCtx = args.capability?.max_context_tokens ?? 0;
-  // The provider backend computes the safe request-specific value from the
-  // serialized prompt. Locally using the largest cap avoids cutting off
-  // thinking before the model produces a summary.
-  const cap =
+  const maxOut = args.capability?.max_output_tokens ?? 0;
+  let cap =
     args.budget.hardCap ??
-    (maxCtx > 0 ? maxCtx : args.budget.fallback ?? DEFAULT_UNKNOWN_CONTEXT_FALLBACK);
+    (maxOut > 0 ? maxOut : args.budget.fallback ?? DEFAULT_UNKNOWN_CONTEXT_FALLBACK);
+  if (maxCtx > 0) {
+    cap = Math.min(cap, maxCtx);
+  }
   return Math.max(MIN_FLOOR, cap);
 }
 
