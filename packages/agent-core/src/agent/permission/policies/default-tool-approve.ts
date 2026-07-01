@@ -1,4 +1,5 @@
-import type { PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import type { PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import { BasePermissionPolicy } from '../base-policy';
 
 const DEFAULT_APPROVE_TOOLS = new Set([
   'Read',
@@ -22,8 +23,9 @@ const DEFAULT_APPROVE_TOOLS = new Set([
   'UpdateGoal',
 ]);
 
-export class DefaultToolApprovePermissionPolicy implements PermissionPolicy {
+export class DefaultToolApprovePermissionPolicy extends BasePermissionPolicy {
   readonly name = 'default-tool-approve';
+  readonly category = 'approve' as const;
 
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
     if (!DEFAULT_APPROVE_TOOLS.has(context.toolCall.name)) return;

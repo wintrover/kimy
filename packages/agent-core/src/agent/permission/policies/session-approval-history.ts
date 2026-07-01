@@ -4,15 +4,18 @@ import {
   type PermissionRuleMatch,
 } from '../matches-rule';
 import type {
-  PermissionPolicy,
   PermissionPolicyContext,
   PermissionPolicyResult,
 } from '../types';
+import { BasePermissionPolicy } from '../base-policy';
 
-export class SessionApprovalHistoryPermissionPolicy implements PermissionPolicy {
+export class SessionApprovalHistoryPermissionPolicy extends BasePermissionPolicy {
   readonly name = 'session-approval-history';
+  readonly category = 'approve' as const;
 
-  constructor(private readonly agent: Agent) {}
+  constructor(private readonly agent: Agent) {
+    super();
+  }
 
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
     const match = this.matchSessionApprovalRule(context);

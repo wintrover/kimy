@@ -111,6 +111,7 @@ function catalogConfig(): KimiConfig {
       },
       openai: { type: 'openai' },
     },
+    agentRole: 'default',
     defaultModel: 'k2',
     models: {
       k2: {
@@ -230,6 +231,7 @@ describe('ModelCatalogService', () => {
             oauth: { storage: 'file', key: 'oauth/kimi-code' },
           },
         },
+        agentRole: 'default',
         defaultModel: 'kimi-code/kimi-for-coding',
         defaultThinking: false,
         models: {

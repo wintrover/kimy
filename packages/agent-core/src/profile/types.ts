@@ -13,12 +13,15 @@ export const RawAgentProfileSchema = z.object({
   extends: z.string().optional(),
   name: z.string().min(1),
   description: z.string().optional(),
+  type: z.enum(['coder', 'orchestrator']).default('coder'),
   systemPromptPath: z.string().optional(),
   systemPromptTemplate: z.string().optional(),
   promptVars: z.record(z.string(), z.string()).optional(),
   // Exact builtin/user tool names, plus optional MCP glob patterns
   // (`mcp__*`, `mcp__github__*`) that gate which MCP tools the profile sees.
   tools: z.array(z.string()).optional(),
+  temperature: z.number().optional(),
+  seed: z.number().optional(),
   whenToUse: z.string().optional(),
   subagents: z.record(z.string(), RawSubagentProfileSchema).optional(),
 });
@@ -51,6 +54,8 @@ export interface ResolvedAgentProfile {
   description?: string;
   systemPrompt: SystemPromptRenderer;
   tools: string[];
+  temperature?: number;
+  seed?: number;
   whenToUse?: string;
   subagents?: Record<string, ResolvedAgentProfile>;
 }

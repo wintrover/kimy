@@ -442,6 +442,7 @@ function _typeOnlyChecks(): void {
     name: 'x',
     description: 'x',
     parameters: { type: 'object' },
+    validateArgs: (args: unknown) => ({ success: true as const, data: args }),
     resolveExecution: () => ({
       approvalRule: 'x',
       execute: async (_ctx: ExecutableToolContext) => ({ output: 'ok' }),
@@ -452,6 +453,7 @@ function _typeOnlyChecks(): void {
     name: 'x',
     description: 'x',
     parameters: { type: 'object' },
+    validateArgs: (args: unknown) => ({ success: true as const, data: args }),
     resolveExecution: (args) => ({
       accesses: ToolAccesses.none(),
       description: `Running ${args.text}`,
@@ -464,6 +466,7 @@ function _typeOnlyChecks(): void {
     name: 'x',
     description: 'x',
     parameters: { type: 'object' },
+    validateArgs: (args: unknown) => ({ success: true as const, data: args }),
     resolveExecution: () => ({
       approvalRule: 'x',
       execute: async (_ctx: ExecutableToolContext) => ({ output: 'ok' }),

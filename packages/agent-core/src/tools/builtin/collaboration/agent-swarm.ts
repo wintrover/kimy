@@ -9,6 +9,7 @@ import {
 } from '../../../session/subagent-host';
 import { ToolAccesses } from '../../../loop/tool-access';
 import type { ExecutableToolContext, ExecutableToolResult, ToolExecution } from '../../../loop/types';
+import { createAjvValidateArgs } from '../../args-validator';
 import { toInputJsonSchema } from '../../support/input-schema';
 import AGENT_SWARM_DESCRIPTION from './agent-swarm.md?raw';
 
@@ -87,6 +88,8 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
   readonly name = 'AgentSwarm' as const;
   readonly description = AGENT_SWARM_DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(AgentSwarmToolInputSchema);
+  private readonly _validateArgs = createAjvValidateArgs(this.parameters);
+  validateArgs(args: unknown) { return this._validateArgs(args); }
 
   constructor(
     private readonly subagentHost: SessionSubagentHost,

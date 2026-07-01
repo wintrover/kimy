@@ -13,6 +13,7 @@ import { z } from 'zod';
 import type { BuiltinTool } from '../../../agent/tool';
 import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import type { ToolInputDisplay } from '../../display';
+import { createAjvValidateArgs } from '../../args-validator';
 import { toInputJsonSchema } from '../../support/input-schema';
 import DESCRIPTION from './exit-plan-mode.md?raw';
 
@@ -83,6 +84,8 @@ export class ExitPlanModeTool implements BuiltinTool<ExitPlanModeInput> {
   readonly name = 'ExitPlanMode' as const;
   readonly description: string = DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(ExitPlanModeInputSchema);
+  private readonly _validateArgs = createAjvValidateArgs(this.parameters);
+  validateArgs(args: unknown) { return this._validateArgs(args); }
 
   constructor(private readonly agent: Agent) {}
 

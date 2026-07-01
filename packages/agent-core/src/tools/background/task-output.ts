@@ -23,6 +23,7 @@ import {
   type BackgroundTaskStatus,
 } from '../../agent/background';
 import type { ExecutableToolResult, ToolExecution } from '../../loop/types';
+import { createAjvValidateArgs } from '../args-validator';
 import { toInputJsonSchema } from '../support/input-schema';
 import { matchesGlobRuleSubject } from '../support/rule-match';
 import { formatPlainObject } from './format';
@@ -98,6 +99,8 @@ export class TaskOutputTool implements BuiltinTool<TaskOutputInput> {
   readonly name = 'TaskOutput' as const;
   readonly description: string = TASK_OUTPUT_DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(TaskOutputInputSchema);
+  private readonly _validateArgs = createAjvValidateArgs(this.parameters);
+  validateArgs(args: unknown) { return this._validateArgs(args); }
 
   constructor(private readonly manager: BackgroundManager) {}
 

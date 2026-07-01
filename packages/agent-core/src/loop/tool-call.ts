@@ -16,12 +16,6 @@
 import type { ContentPart } from '@moonshot-ai/kosong';
 
 import type { Logger } from '#/logging/types';
-import {
-  compileToolArgsValidator,
-  validateToolArgs,
-  type JsonType,
-  type ToolArgsValidator,
-} from '../tools/args-validator';
 import { PathSecurityError } from '../tools/policies/path-access';
 
 import { isUserCancellation } from '../utils/abort';
@@ -44,8 +38,6 @@ import type {
 const GRACE_TIMEOUT_MS = 2_000;
 const TOOL_OUTPUT_EMPTY = 'Tool output is empty.';
 const TOOL_OUTPUT_NON_TEXT = 'Tool returned non-text content.';
-
-const validators = new WeakMap<ExecutableTool, ToolArgsValidator>();
 
 /**
  * Output for an aborted tool call. When the abort carries a user-cancellation
@@ -117,6 +109,13 @@ type ToolCallDisplayFields = Pick<LoopToolCallEvent, 'description' | 'display'>;
 
 export interface ToolCallBatchResult {
   readonly stopTurn: boolean;
+  /**
+   * True when the batch was intercepted as a virtual-turn (mixed AgentSwarm +
+   * leaf-tool batch). Execution was suppressed and error results were emitted
+   * for every tool call so the transcript stays paired. The host should inject
+   * a correction message and re-invoke the LLM.
+   */
+  readonly virtualTurn?: boolean | undefined;
 }
 
 export async function runToolCallBatch(
@@ -124,6 +123,35 @@ export async function runToolCallBatch(
   response: LLMChatResponse,
 ): Promise<ToolCallBatchResult> {
   if (response.toolCalls.length === 0) return { stopTurn: false };
+
+  // Virtual-turn interception: when the batch mixes AgentSwarm with any other
+  // tool, suppress ALL execution so the batch never actually runs.  Emit a
+  // paired tool.call + error tool.result for every call so the transcript stays
+  // consistent, then signal virtualTurn so the host can inject a correction
+  // message and re-invoke the LLM.
+  if (isMixedAgentSwarmBatch(response.toolCalls)) {
+    const batchStep: ToolCallBatchContext = { ...step, toolCalls: response.toolCalls };
+    const virtualTurnMessage =
+      'AgentSwarm must be the only tool call in a model response. ' +
+      'Retry with a single AgentSwarm call by itself, then call any other tools after it returns.';
+    for (const toolCall of response.toolCalls) {
+      const parsedArgs = parseToolCallArguments(toolCall.arguments);
+      const args = parsedArgs.success ? parsedArgs.data : {};
+      await dispatchToolCall(
+        batchStep,
+        { kind: 'rejected', toolCall, toolName: toolCall.name, args, output: virtualTurnMessage },
+        args,
+      );
+      await step.dispatchEvent({
+        type: 'tool.result',
+        parentUuid: toolCall.id,
+        toolCallId: toolCall.id,
+        result: { output: virtualTurnMessage, isError: true },
+      });
+    }
+    return { stopTurn: true, virtualTurn: true };
+  }
+
   const batchStep: ToolCallBatchContext = { ...step, toolCalls: response.toolCalls };
   const calls = response.toolCalls.map((toolCall) => preflightToolCall(step.tools, toolCall));
   const scheduler = new ToolScheduler<PendingToolResult>();
@@ -198,17 +226,24 @@ function preflightToolCall(
       output: `Invalid args for tool "${toolName}": malformed JSON in arguments: ${parsedArgs.error}`,
     };
   }
-  const validationError = validateExecutableToolArgs(tool, parsedArgs.data);
+  // Step 1: Alias resolution
+  const rawArgs = parsedArgs.data as Record<string, unknown>;
+  const resolved = tool.metadata?.paramAliases
+    ? resolveAliases(tool.metadata.paramAliases, rawArgs)
+    : rawArgs;
+
+  // Step 2: Zod-First validation (with coercion)
+  const validationError = validateExecutableToolArgs(tool, resolved);
   if (validationError !== null) {
     return {
       kind: 'rejected',
       toolCall,
       toolName,
-      args: parsedArgs.data,
+      args: resolved,
       output: `Invalid args for tool "${toolName}": ${validationError}`,
     };
   }
-  return { kind: 'runnable', toolCall, toolName, tool, args: parsedArgs.data };
+  return { kind: 'runnable', toolCall, toolName, tool, args: resolved };
 }
 
 function parseToolCallArguments(
@@ -227,16 +262,26 @@ function parseToolCallArguments(
 }
 
 function validateExecutableToolArgs(tool: ExecutableTool, args: unknown): string | null {
-  let validator = validators.get(tool);
-  if (validator === undefined) {
-    try {
-      validator = compileToolArgsValidator(tool.parameters);
-      validators.set(tool, validator);
-    } catch (error) {
-      return error instanceof Error ? error.message : String(error);
+  const result = tool.validateArgs(args);
+  if (result.success) return null;
+  if (result.errors.length === 0) return 'Tool parameter validation failed';
+  return result.errors.map((e) => e.message).join('; ');
+}
+
+function resolveAliases(
+  aliases: Readonly<Record<string, string>>,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  let changed = false;
+  const result = { ...args };
+  for (const [from, to] of Object.entries(aliases)) {
+    if (from in result && !(to in result)) {
+      result[to] = result[from];
+      delete result[from];
+      changed = true;
     }
   }
-  return validateToolArgs(validator, args as JsonType);
+  return changed ? result : args;
 }
 
 async function prepareToolCall(
@@ -728,4 +773,16 @@ async function dispatchToolCall(
     description: displayFields?.description,
     display: displayFields?.display,
   });
+}
+
+/**
+ * Detect a mixed AgentSwarm batch: one that contains AgentSwarm together with
+ * any other tool call.  Such batches must be intercepted before execution so
+ * the loop can inject a correction message and re-invoke the LLM.
+ */
+function isMixedAgentSwarmBatch(toolCalls: readonly ToolCall[]): boolean {
+  if (toolCalls.length <= 1) return false;
+  const hasAgentSwarm = toolCalls.some((tc) => tc.name === 'AgentSwarm');
+  if (!hasAgentSwarm) return false;
+  return toolCalls.length > 1;
 }

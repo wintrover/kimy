@@ -309,7 +309,7 @@ removed_flag = true
     const dir = makeTempDir();
     const configPath = join(dir, 'config.toml');
 
-    expect(readConfigFile(configPath)).toEqual({ providers: {} });
+    expect(readConfigFile(configPath)).toEqual({ providers: {}, agentRole: 'default' });
 
     const config = parseConfigString(COMPLETE_TOML, configPath);
     const loopControl = config.loopControl;
@@ -457,7 +457,7 @@ hooks = [{ type = "pre-tool-call", command = "echo hi" }]
 
 describe('harness config schema and patch merge', () => {
   it('accepts the empty public config and requires model context size in full configs', () => {
-    expect(KimiConfigSchema.parse({})).toEqual({ providers: {} });
+    expect(KimiConfigSchema.parse({})).toEqual({ providers: {}, agentRole: 'default' });
     expect(() =>
       validateConfig({
         providers: {
@@ -525,7 +525,7 @@ micro_compaction = false
 
   it('rejects unknown fields in config patches', () => {
     expectKimiErrorCode(
-      () => mergeConfigPatch({ providers: {} }, { theme: 'dark' } as never),
+      () => mergeConfigPatch({ providers: {}, agentRole: 'default' }, { theme: 'dark' } as never),
       ErrorCodes.CONFIG_INVALID,
     );
   });

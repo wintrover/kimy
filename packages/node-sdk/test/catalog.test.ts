@@ -125,6 +125,58 @@ describe('applyCatalogProvider', () => {
     });
   });
 
+  it('applies default capability overrides to models with incomplete catalog metadata', () => {
+    const deepseekModel: CatalogModel = {
+      id: 'deepseek-v4-flash',
+      name: 'DeepSeek V4 Flash',
+      capability: {
+        image_in: false,
+        video_in: false,
+        audio_in: false,
+        thinking: false,
+        tool_use: false,
+        max_context_tokens: 128000,
+      },
+    };
+    const config = { providers: {} } as KimiConfig;
+
+    applyCatalogProvider(config, {
+      providerId: 'deepseek-ai',
+      wire: 'openai',
+      baseUrl: 'https://api.deepseek.com',
+      apiKey: 'sk',
+      models: [deepseekModel],
+      selectedModelId: 'deepseek-v4-flash',
+      thinking: false,
+    });
+
+    expect(config.models?.['deepseek-ai/deepseek-v4-flash']?.capabilities).toContain('tool_use');
+  });
+
+  it('merges default capabilities into models whose catalog metadata is incomplete', () => {
+    const config = { providers: {} } as KimiConfig;
+    const Model = {
+      ...model,
+      id: 'deepseek-v4-flash',
+      capability: {
+        ...model.capability,
+        tool_use: false,
+      },
+    };
+
+    applyCatalogProvider(config, {
+      providerId: 'deepseek-ai',
+      wire: 'openai',
+      baseUrl: 'https://api.deepseek.com',
+      apiKey: 'sk',
+      models: [Model],
+      selectedModelId: 'deepseek-v4-flash',
+      thinking: false,
+    });
+
+    expect(config.models?.['deepseek-ai/deepseek-v4-flash']?.capabilities).toContain('tool_use');
+  });
+
   it('clears stale aliases for the same provider but keeps others', () => {
     const config = {
       providers: { anthropic: { type: 'anthropic', apiKey: 'old' } },

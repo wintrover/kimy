@@ -7,6 +7,7 @@ import { z } from 'zod';
 import type { BackgroundManager, BackgroundTaskInfo } from '../../agent/background';
 import type { BuiltinTool } from '../../agent/tool';
 import type { ToolExecution } from '../../loop/types';
+import { createAjvValidateArgs } from '../args-validator';
 import { toInputJsonSchema } from '../support/input-schema';
 import { matchesGlobRuleSubject } from '../support/rule-match';
 import { formatPlainObject } from './format';
@@ -47,6 +48,8 @@ export class TaskListTool implements BuiltinTool<TaskListInput> {
   readonly name = 'TaskList' as const;
   readonly description = TASK_LIST_DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(TaskListInputSchema);
+  private readonly _validateArgs = createAjvValidateArgs(this.parameters);
+  validateArgs(args: unknown) { return this._validateArgs(args); }
 
   constructor(private readonly manager: BackgroundManager) {}
 

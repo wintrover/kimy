@@ -1,8 +1,8 @@
 import type { Agent } from '../..';
+import { BasePermissionPolicy } from '../base-policy';
 import type {
   ApprovalResponse,
   PermissionMode,
-  PermissionPolicy,
   PermissionPolicyContext,
   PermissionPolicyResult,
 } from '../types';
@@ -14,10 +14,13 @@ import type {
  * chosen mode is applied before the goal is created so the run proceeds under
  * it. `auto` mode auto-approves the goal upstream and never reaches here.
  */
-export class GoalStartReviewAskPermissionPolicy implements PermissionPolicy {
+export class GoalStartReviewAskPermissionPolicy extends BasePermissionPolicy {
   readonly name = 'goal-start-review-ask';
+  readonly category = 'ask_lifecycle' as const;
 
-  constructor(private readonly agent: Agent) {}
+  constructor(private readonly agent: Agent) {
+    super();
+  }
 
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
     if (context.toolCall.name !== 'CreateGoal') return;

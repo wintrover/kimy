@@ -4,13 +4,13 @@ import {
   type PermissionRuleMatch,
 } from '../matches-rule';
 import type {
-  PermissionPolicy,
   PermissionPolicyContext,
   PermissionPolicyResult,
   PermissionRule,
   PermissionRuleDecision,
   PermissionRuleScope,
 } from '../types';
+import { BasePermissionPolicy } from '../base-policy';
 
 const USER_CONFIGURED_SCOPES = new Set<PermissionRuleScope>([
   'turn-override',
@@ -18,8 +18,10 @@ const USER_CONFIGURED_SCOPES = new Set<PermissionRuleScope>([
   'user',
 ]);
 
-abstract class UserConfiguredPermissionPolicy {
-  constructor(protected readonly agent: Agent) {}
+abstract class UserConfiguredPermissionPolicy extends BasePermissionPolicy {
+  constructor(protected readonly agent: Agent) {
+    super();
+  }
 
   protected firstMatchingRule(
     context: PermissionPolicyContext,
@@ -43,9 +45,9 @@ abstract class UserConfiguredPermissionPolicy {
 
 export class UserConfiguredDenyPermissionPolicy
   extends UserConfiguredPermissionPolicy
-  implements PermissionPolicy
 {
   readonly name = 'user-configured-deny';
+  readonly category = 'deny' as const;
 
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
     const match = this.firstMatchingRule(context, 'deny');
@@ -64,9 +66,9 @@ export class UserConfiguredDenyPermissionPolicy
 
 export class UserConfiguredAllowPermissionPolicy
   extends UserConfiguredPermissionPolicy
-  implements PermissionPolicy
 {
   readonly name = 'user-configured-allow';
+  readonly category = 'approve' as const;
 
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
     const match = this.firstMatchingRule(context, 'allow');
@@ -80,9 +82,9 @@ export class UserConfiguredAllowPermissionPolicy
 
 export class UserConfiguredAskPermissionPolicy
   extends UserConfiguredPermissionPolicy
-  implements PermissionPolicy
 {
   readonly name = 'user-configured-ask';
+  readonly category = 'ask_resource' as const;
 
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
     const match = this.firstMatchingRule(context, 'ask');

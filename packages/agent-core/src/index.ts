@@ -80,6 +80,7 @@ export type {
   ExecutableToolResult,
   ExecutableToolSuccessResult,
   ExecutableToolErrorResult,
+  ValidationError,
 } from './loop/types';
 
 // ─── Dependency injection container ────────────────────────────────────────

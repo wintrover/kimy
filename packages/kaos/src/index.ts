@@ -36,3 +36,14 @@ export {
   writeBytes,
   writeText,
 } from './current';
+export { JournalKaos } from './journal';
+export type { FileChange, TransactionSnapshot } from './journal';
+export { SandboxKaos, SandboxViolationError, TimeoutError, createCommandFilter } from './sandbox';
+export type {
+  CommandFilter,
+  CommandFilterConfig,
+  ContainerIsolationConfig,
+  NamespaceIsolationConfig,
+} from './sandbox';
+export { createIsolatedWorktree } from './git-worktree';
+export type { GitWorktreeHandle, IsolatedWorktreeResult } from './git-worktree';

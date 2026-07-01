@@ -10,6 +10,7 @@ import { z } from 'zod';
 import type { BuiltinTool } from '../../../agent/tool';
 import type { GoalBudgetLimits } from '../../../agent/goal';
 import type { ToolExecution } from '../../../loop/types';
+import { createAjvValidateArgs } from '../../args-validator';
 import { toInputJsonSchema } from '../../support/input-schema';
 import DESCRIPTION from './set-goal-budget.md?raw';
 
@@ -32,6 +33,8 @@ export class SetGoalBudgetTool implements BuiltinTool<SetGoalBudgetToolInput> {
   readonly name = 'SetGoalBudget' as const;
   readonly description: string = DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(SetGoalBudgetToolInputSchema);
+  private readonly _validateArgs = createAjvValidateArgs(this.parameters);
+  validateArgs(args: unknown) { return this._validateArgs(args); }
 
   constructor(private readonly agent: Agent) {}
 

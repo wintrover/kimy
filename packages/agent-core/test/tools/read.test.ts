@@ -992,3 +992,69 @@ describe('ReadTool description and schema parity', () => {
     expect(tool.description).toMatch(/binary/i);
   });
 });
+
+describe('line_offset coercion (z.overwrite)', () => {
+  it('should accept string "200" as line_offset via Zod safeParse', () => {
+    const result = ReadInputSchema.safeParse({ path: 'test.txt', line_offset: '200' });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.line_offset).toBe(200);
+  });
+
+  it('should accept string "-50" as tail offset', () => {
+    const result = ReadInputSchema.safeParse({ path: 'test.txt', line_offset: '-50' });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.line_offset).toBe(-50);
+  });
+
+  it('should reject non-numeric string "abc"', () => {
+    const result = ReadInputSchema.safeParse({ path: 'test.txt', line_offset: 'abc' });
+    expect(result.success).toBe(false);
+  });
+
+  it('should accept integer 200 directly', () => {
+    const result = ReadInputSchema.safeParse({ path: 'test.txt', line_offset: 200 });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.line_offset).toBe(200);
+  });
+
+  it('should accept string "10" as n_lines', () => {
+    const result = ReadInputSchema.safeParse({ path: 'test.txt', n_lines: '10' });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.n_lines).toBe(10);
+  });
+
+  it('should default line_offset to undefined when omitted', () => {
+    const result = ReadInputSchema.safeParse({ path: 'test.txt' });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.line_offset).toBeUndefined();
+  });
+});
+
+describe('ReadTool metadata', () => {
+  it('should expose paramAliases mapping offset to line_offset', () => {
+    const fakeKaos = {
+      stat: async () => ({ stMode: 0o100644, stIno: 1, stDev: 1, stNlink: 1, stUid: 1000, stGid: 1000, stSize: 0, stAtime: 0, stMtime: 0, stCtime: 0 }),
+      readLines: async function* () {},
+      readBytes: async () => Buffer.alloc(0),
+      gethome: () => '/tmp',
+      pathClass: () => 'posix' as const,
+    } as unknown as import('@moonshot-ai/kaos').Kaos;
+    const workspace = { workspaceDir: '/tmp', isPathAllowed: () => true } as unknown as WorkspaceConfig;
+    const tool = new ReadTool(fakeKaos, workspace);
+    expect(tool.metadata?.paramAliases).toEqual({ offset: 'line_offset' });
+  });
+
+  it('should expose inputSchema for Zod-First validation', () => {
+    const fakeKaos = {
+      stat: async () => ({ stMode: 0o100644, stIno: 1, stDev: 1, stNlink: 1, stUid: 1000, stGid: 1000, stSize: 0, stAtime: 0, stMtime: 0, stCtime: 0 }),
+      readLines: async function* () {},
+      readBytes: async () => Buffer.alloc(0),
+      gethome: () => '/tmp',
+      pathClass: () => 'posix' as const,
+    } as unknown as import('@moonshot-ai/kaos').Kaos;
+    const workspace = { workspaceDir: '/tmp', isPathAllowed: () => true } as unknown as WorkspaceConfig;
+    const tool = new ReadTool(fakeKaos, workspace);
+    expect(tool.schema).toBeDefined();
+    expect(tool.validateArgs).toBeDefined();
+  });
+});

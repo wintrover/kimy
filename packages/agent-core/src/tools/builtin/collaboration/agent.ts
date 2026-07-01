@@ -31,6 +31,7 @@ import {
 } from '../../../session/subagent-host';
 import { isUserCancellation } from '../../../utils/abort';
 import { AgentBackgroundTask, type BackgroundManager } from '../../../agent/background';
+import { createAjvValidateArgs } from '../../args-validator';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { matchesGlobRuleSubject } from '../../support/rule-match';
 import AGENT_BACKGROUND_DISABLED_DESCRIPTION from './agent-background-disabled.md?raw';
@@ -106,6 +107,8 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
   readonly name: string = 'Agent';
   readonly description: string;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(AgentToolInputSchema);
+  private readonly _validateArgs = createAjvValidateArgs(this.parameters);
+  validateArgs(args: unknown) { return this._validateArgs(args); }
   constructor(
     private readonly subagentHost: SessionSubagentHost,
     private readonly backgroundManager: BackgroundManager,

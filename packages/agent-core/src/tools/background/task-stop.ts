@@ -10,6 +10,7 @@ import {
   type BackgroundManager,
 } from '../../agent/background';
 import type { ToolExecution } from '../../loop/types';
+import { createAjvValidateArgs } from '../args-validator';
 import { toInputJsonSchema } from '../support/input-schema';
 import { matchesGlobRuleSubject } from '../support/rule-match';
 import TASK_STOP_DESCRIPTION from './task-stop.md?raw';
@@ -33,6 +34,8 @@ export class TaskStopTool implements BuiltinTool<TaskStopInput> {
   readonly name = 'TaskStop' as const;
   readonly description = TASK_STOP_DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(TaskStopInputSchema);
+  private readonly _validateArgs = createAjvValidateArgs(this.parameters);
+  validateArgs(args: unknown) { return this._validateArgs(args); }
 
   constructor(private readonly manager: BackgroundManager) {}
 

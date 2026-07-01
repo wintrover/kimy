@@ -125,6 +125,7 @@ tools:
       resolveAgentProfiles([
         {
           name: 'agent',
+          type: 'orchestrator' as const,
           subagents: {
             missing: { description: 'Missing subagent' },
           },
@@ -132,14 +133,14 @@ tools:
       ]),
     ).toThrow(/declares subagent "missing"/);
 
-    expect(() => resolveAgentProfiles([{ name: 'agent' }, { name: 'agent' }])).toThrow(
+    expect(() => resolveAgentProfiles([{ name: 'agent', type: 'orchestrator' as const }, { name: 'agent', type: 'orchestrator' as const }])).toThrow(
       /Duplicate agent profile name: "agent"/,
     );
 
     expect(() =>
       resolveAgentProfiles([
-        { name: 'agent', extends: 'coder' },
-        { name: 'coder', extends: 'agent' },
+        { name: 'agent', type: 'orchestrator' as const, extends: 'coder' },
+        { name: 'coder', type: 'orchestrator' as const, extends: 'agent' },
       ]),
     ).toThrow(/agent -> coder -> agent/);
   });

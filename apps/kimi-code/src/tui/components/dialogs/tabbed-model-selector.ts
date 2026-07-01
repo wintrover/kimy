@@ -3,7 +3,7 @@
  * that splits the model list into per-provider tabs.
  *
  * Tabs are derived from the `models` passed at construction time:
- *   ['all', ...uniqueProviderIds]   (insertion order, deduplicated)
+ * ['all', ...uniqueProviderIds] (insertion order, deduplicated)
  *
  * Each tab owns its own inner ModelSelectorComponent built from the filtered
  * subset of models. ↑/↓/Enter/Esc/←/→ (thinking) and typing (filter) are
@@ -24,6 +24,11 @@ import {
 
 import { currentTheme } from '#/tui/theme';
 import { renderTabStrip } from '#/tui/utils/tab-strip';
+import {
+  isPurgedModel,
+  lookupBenchmarkScore,
+  sortModelsByBenchmark,
+} from '#/tui/utils/model-sort';
 
 import {
   ModelSelectorComponent,
@@ -85,7 +90,8 @@ export class TabbedModelSelectorComponent extends Container implements Focusable
         return;
       }
       if (matchesKey(data, Key.shift('tab'))) {
-        this.activeIndex = (this.activeIndex - 1 + this.tabs.length) % this.tabs.length;
+        this.activeIndex =
+          (this.activeIndex - 1 + this.tabs.length) % this.tabs.length;
         this.syncFocusToActive();
         return;
       }
@@ -136,6 +142,37 @@ export class TabbedModelSelectorComponent extends Container implements Focusable
   }
 }
 
+/**
+ * Filter out purged models, sort by benchmark score descending,
+ * and apply tier badges († for Tier 2, ‡ for Tier 3).
+ * Idempotent: strips existing badges before re-applying.
+ */
+function sortAndTierModels(
+  entries: [string, ModelAlias][],
+): Record<string, ModelAlias> {
+  const filtered = entries.filter(([alias]) => !isPurgedModel(alias));
+  const sorted = sortModelsByBenchmark(filtered);
+  const withTiers = sorted.map(([alias, model]) => {
+    const result = lookupBenchmarkScore(alias, model);
+    const baseName = model.displayName ?? alias;
+    const cleanName = baseName.replace(/[†‡]+$/, '');
+    if (result !== undefined && result.tier === 2) {
+      return [
+        alias,
+        { ...model, displayName: cleanName + '†' },
+      ] as [string, ModelAlias];
+    }
+    if (result !== undefined && result.tier === 3) {
+      return [
+        alias,
+        { ...model, displayName: cleanName + '‡' },
+      ] as [string, ModelAlias];
+    }
+    return [alias, { ...model, displayName: cleanName }];
+  });
+  return Object.fromEntries(withTiers);
+}
+
 function buildTabs(opts: TabbedModelSelectorOptions): readonly ModelTab[] {
   const entries = Object.entries(opts.models);
   const providerIds: string[] = [];
@@ -148,18 +185,22 @@ function buildTabs(opts: TabbedModelSelectorOptions): readonly ModelTab[] {
     }
   }
 
+  const allEntries = Object.entries(opts.models);
+  const allModels = sortAndTierModels(allEntries);
   const tabs: ModelTab[] = [
     {
       id: ALL_TAB_ID,
       label: ALL_TAB_LABEL,
-      selector: makeSelector(opts, opts.models),
+      selector: makeSelector(opts, allModels),
     },
   ];
+
   for (const providerId of providerIds) {
-    const subset: Record<string, ModelAlias> = {};
-    for (const [alias, model] of entries) {
-      if (model.provider === providerId) subset[alias] = model;
+    let providerEntries = entries.filter(([, model]) => model.provider === providerId);
+    if (providerId === 'nvidia') {
+      providerEntries = Object.entries(sortAndTierModels(providerEntries));
     }
+    const subset: Record<string, ModelAlias> = Object.fromEntries(providerEntries);
     tabs.push({
       id: providerId,
       label: providerDisplayName(providerId),

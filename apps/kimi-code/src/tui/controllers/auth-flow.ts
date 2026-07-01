@@ -1,7 +1,9 @@
 import type { CreateSessionOptions, KimiHarness, Session } from '@moonshot-ai/kimi-code-sdk';
+import { createAgentContext } from '@moonshot-ai/kimi-code-sdk';
 import type { SkillListSession } from '../commands';
 
 import { OAUTH_LOGIN_REQUIRED_STARTUP_NOTICE } from '../constant/kimi-tui';
+import { resolveSubagentModel } from '#/tui/utils/model-capabilities';
 import {
   refreshAllProviderModels,
   type RefreshProviderScope,
@@ -81,6 +83,7 @@ export class AuthFlowController {
           ? 'yolo'
           : undefined,
       planMode: host.state.appState.planMode ? true : undefined,
+      agentContext: host.options.startup.orchestrator ? createAgentContext(undefined, true) : undefined,
     };
     if (host.state.appState.additionalDirs.length > 0) {
       options.additionalDirs = [...host.state.appState.additionalDirs];
@@ -114,11 +117,16 @@ export class AuthFlowController {
     const config = await host.harness.getConfig({ reload: true });
     const availableModels = config.models ?? {};
     const availableProviders = config.providers ?? {};
+    const resolvedSubagentModel = resolveSubagentModel(
+      config.subagentModel,
+      config.defaultModel,
+      availableModels,
+    );
     const defaultModel = host.options.startup.model ?? config.defaultModel;
     const selected = defaultModel !== undefined ? availableModels[defaultModel] : undefined;
 
     if (defaultModel === undefined || selected === undefined) {
-      host.setAppState({ availableModels, availableProviders });
+      host.setAppState({ availableModels, availableProviders, subagentModel: resolvedSubagentModel });
       return;
     }
 
@@ -126,6 +134,7 @@ export class AuthFlowController {
     const appStatePatch: Partial<AppState> = {
       availableModels,
       availableProviders,
+      subagentModel: resolvedSubagentModel,
       model: defaultModel,
       maxContextTokens: selected.maxContextSize,
     };

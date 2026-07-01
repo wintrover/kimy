@@ -1,5 +1,6 @@
 import type { Agent } from '../..';
-import type { ApprovalResponse, PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import { BasePermissionPolicy } from '../base-policy';
+import type { ApprovalResponse, PermissionPolicyContext, PermissionPolicyResult } from '../types';
 
 interface ExitPlanModeOption {
   readonly label: string;
@@ -12,10 +13,13 @@ interface PlanReviewDisplay {
   readonly options?: readonly ExitPlanModeOption[] | undefined;
 }
 
-export class ExitPlanModeReviewAskPermissionPolicy implements PermissionPolicy {
+export class ExitPlanModeReviewAskPermissionPolicy extends BasePermissionPolicy {
   readonly name = 'exit-plan-mode-review-ask';
+  readonly category = 'ask_lifecycle' as const;
 
-  constructor(private readonly agent: Agent) {}
+  constructor(private readonly agent: Agent) {
+    super();
+  }
 
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
     if (context.toolCall.name !== 'ExitPlanMode') return;
@@ -24,9 +28,6 @@ export class ExitPlanModeReviewAskPermissionPolicy implements PermissionPolicy {
     const display = context.execution.display;
     if (display?.kind !== 'plan_review') return;
     if (display.plan.trim().length === 0) return;
-    this.agent.telemetry.track('plan_submitted', {
-      has_options: display.options !== undefined && display.options.length >= 2,
-    });
     return {
       kind: 'ask',
       reason: {
@@ -39,6 +40,15 @@ export class ExitPlanModeReviewAskPermissionPolicy implements PermissionPolicy {
           options: display.options,
         }),
     };
+  }
+
+  onSelected(context: PermissionPolicyContext, result: PermissionPolicyResult): void {
+    if (context.toolCall.name !== 'ExitPlanMode') return;
+    const display = context.execution.display;
+    if (display?.kind !== 'plan_review') return;
+    this.agent.telemetry.track('plan_submitted', {
+      has_options: display.options !== undefined && display.options.length >= 2,
+    });
   }
 
   private exitPlanModeApprovalResult(result: ApprovalResponse, display: PlanReviewDisplay) {

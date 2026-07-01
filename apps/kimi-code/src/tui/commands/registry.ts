@@ -26,6 +26,10 @@ const SWARM_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
   { value: 'off', description: 'Turn swarm mode off' },
 ];
 
+const SUBMODEL_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
+  { value: 'inherit', description: 'Reset to inherit model from parent' },
+];
+
 const ADD_DIR_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
   { value: 'list', description: 'Show configured additional workspace directories' },
 ];
@@ -47,6 +51,11 @@ export function goalArgumentCompletions(argumentPrefix: string): AutocompleteIte
 /** Argument autocompletion for the `/swarm` command (subcommands). */
 export function swarmArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
   return completeLeadingArg(SWARM_ARG_COMPLETIONS, argumentPrefix);
+}
+
+/** Argument autocompletion for the `/submodel` command. */
+export function submodelArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
+  return completeLeadingArg(SUBMODEL_ARG_COMPLETIONS, argumentPrefix);
 }
 
 /** Argument autocompletion for the `/add-dir` command. */
@@ -183,6 +192,14 @@ export const BUILTIN_SLASH_COMMANDS = [
     description: 'Switch LLM model',
     priority: 100,
     availability: 'always',
+  },
+  {
+    name: 'submodel',
+    aliases: [],
+    description: 'Switch sub-agent model',
+    priority: 100,
+    availability: 'always',
+    completeArgs: submodelArgumentCompletions,
   },
   {
     name: 'provider',

@@ -420,6 +420,7 @@ export function projectContext(
       case 'tools.unregister_user_tool':
       case 'tools.set_active_tools':
       case 'tools.update_store':
+      case 'context.restore':
         break;
       default: {
         const _exhaustive: never = rec;

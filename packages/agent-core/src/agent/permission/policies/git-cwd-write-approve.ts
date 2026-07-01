@@ -1,13 +1,17 @@
 import type { Agent } from '../..';
 import { isWithinWorkspace } from '../../../tools/policies/path-access';
 import { findGitWorkTreeMarker } from '../../../tools/support/git-worktree';
-import type { PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import type { PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import { BasePermissionPolicy } from '../base-policy';
 import { writeFileAccesses } from './file-access-ask';
 
-export class GitCwdWriteApprovePermissionPolicy implements PermissionPolicy {
+export class GitCwdWriteApprovePermissionPolicy extends BasePermissionPolicy {
   readonly name = 'git-cwd-write-approve';
+  readonly category = 'approve' as const;
 
-  constructor(private readonly agent: Agent) {}
+  constructor(private readonly agent: Agent) {
+    super();
+  }
 
   async evaluate(context: PermissionPolicyContext): Promise<PermissionPolicyResult | undefined> {
     const toolName = context.toolCall.name;

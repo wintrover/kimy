@@ -50,6 +50,9 @@
     "vitest": "4.1.4"
   },
   "simple-git-hooks": {
+    "post-merge": "pnpm -C apps/kimi-code run build",
+    "post-checkout": "pnpm -C apps/kimi-code run build",
+    "post-commit": "pnpm -C apps/kimi-code run build"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}": [

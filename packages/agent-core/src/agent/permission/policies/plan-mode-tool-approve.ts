@@ -1,11 +1,15 @@
 import type { Agent } from '../..';
-import type { PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import type { PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import { BasePermissionPolicy } from '../base-policy';
 import { writeFileAccesses } from './file-access-ask';
 
-export class PlanModeToolApprovePermissionPolicy implements PermissionPolicy {
+export class PlanModeToolApprovePermissionPolicy extends BasePermissionPolicy {
   readonly name = 'plan-mode-tool-approve';
+  readonly category = 'approve' as const;
 
-  constructor(private readonly agent: Agent) {}
+  constructor(private readonly agent: Agent) {
+    super();
+  }
 
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
     const toolName = context.toolCall.name;

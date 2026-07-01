@@ -74,6 +74,27 @@ export interface ApplyCatalogProviderOptions {
 }
 
 /**
+ * Default capability overrides for models whose catalog metadata may be incomplete.
+ * OR-merged into the alias at catalog load time; runtime `resolveModelCapabilities()`
+ * applies a second OR-merge on top.
+ * Frozen at the module level — never mutated.
+ */
+const DEFAULT_MODEL_CAPABILITIES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  'deepseek-ai/deepseek-v4-flash': ['tool_use'],
+});
+
+function applyDefaultCapabilities(models: Record<string, ModelAlias>): void {
+  for (const [alias, model] of Object.entries(models)) {
+    const overrides =
+      DEFAULT_MODEL_CAPABILITIES[alias] ?? DEFAULT_MODEL_CAPABILITIES[model.model];
+    if (overrides === undefined) continue;
+    const existing = new Set(model.capabilities ?? []);
+    for (const cap of overrides) existing.add(cap);
+    model.capabilities = [...existing];
+  }
+}
+
+/**
  * Parses an optional pruned models.dev catalog string — typically the
  * `__KIMI_CODE_BUILT_IN_CATALOG__` constant injected by tsdown at build
  * time. Returns `undefined` when the argument is missing or invalid.
@@ -116,6 +137,7 @@ export function applyCatalogProvider(
   for (const model of options.models) {
     models[`${options.providerId}/${model.id}`] = catalogModelToAlias(options.providerId, model);
   }
+  applyDefaultCapabilities(models);
   config.models = models;
 
   const defaultModel = `${options.providerId}/${options.selectedModelId}`;

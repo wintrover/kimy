@@ -249,9 +249,9 @@ describe('Session plan, compact, usage, and resume APIs', () => {
       expect(forkPlan).toEqual({
         id: sourcePlan.id,
         content: 'source plan',
-        path: join(forkSummary!.sessionDir, 'agents', 'main', 'plans', `${sourcePlan.id}.md`),
+        path: join(homeDir, 'plans', `${sourcePlan.id}.md`),
       });
-      expect(forkPlan?.path).not.toBe(sourcePlan.path);
+      expect(forkPlan?.path).toBe(sourcePlan.path);
       const forkWire = await readFile(
         join(forkSummary!.sessionDir, 'agents', 'main', 'wire.jsonl'),
         'utf-8',

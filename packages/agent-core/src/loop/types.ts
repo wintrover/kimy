@@ -137,7 +137,39 @@ export interface RunnableToolExecution {
 
 export type ToolExecution = RunnableToolExecution | ExecutableToolErrorResult;
 
+/** Tool metadata: aliases, UI hints, and other per-tool auxiliary information. */
+export interface ToolMetadata {
+  /** Well-known parameter aliases. Maps misspelled names to correct names. */
+  readonly paramAliases?: Readonly<Record<string, string>> | undefined;
+}
+
+/**
+ * Structured validation error returned by {@link ExecutableTool.validateArgs}.
+ *
+ * `path` uses Dot Notation (e.g. `"nested.field"`, `"(root)"`) regardless of
+ * whether the underlying validator is Zod or AJV, so callers never need to
+ * distinguish between the two.
+ */
+export interface ValidationError {
+  readonly path: string;
+  readonly message: string;
+  readonly keyword: string;
+}
+
 export interface ExecutableTool<Input = unknown> extends Tool {
+  /** Tool metadata (aliases, UI hints, etc.). */
+  readonly metadata?: ToolMetadata | undefined;
+  /**
+   * Validate and optionally coerce arguments before execution.
+   *
+   * Each tool owns its validation strategy: Zod-first tools use
+   * `ZodToolBase` (safeParse), legacy tools use `createAjvValidateArgs`
+   * (AJV strict), and MCP / user tools use `createAjvValidateArgs`
+   * (AJV strict, `'log'` for MCP compatibility).
+   */
+  validateArgs(args: unknown):
+    | { readonly success: true; readonly data: unknown }
+    | { readonly success: false; readonly errors: readonly ValidationError[] };
   resolveExecution(input: Input): ToolExecution | Promise<ToolExecution>;
 }
 
@@ -187,6 +219,13 @@ export interface LoopAfterStepContext extends LoopStepHookContext {
 export interface LoopStoppedStepContext extends LoopStepHookContext {
   readonly usage: TokenUsage;
   readonly stopReason: LoopTerminalStepStopReason;
+  /**
+   * True when the step ended because the tool batch was intercepted as a
+   * virtual-turn (e.g. a mixed AgentSwarm + leaf-tool batch). The loop
+   * suppressed execution and the host should inject a correction message
+   * instead of treating this as a normal end_turn.
+   */
+  readonly virtualTurn?: boolean | undefined;
 }
 
 export interface BeforeStepResult {
@@ -208,6 +247,17 @@ export interface RecordStepUsageResult {
 
 export interface ShouldContinueAfterStopResult {
   readonly continue: boolean;
+}
+
+/**
+ * Signal injected into the permission-policy context when a policy detects a
+ * condition that requires the loop to abort the current tool batch and
+ * re-invoke the LLM for a virtual turn (e.g. a mixed AgentSwarm + leaf-tool
+ * batch that should never have been generated).
+ */
+export interface VirtualTurnTrigger {
+  readonly reason: 'agent-swarm-mixed-batch';
+  readonly message: string;
 }
 
 export type BeforeStepHook = (ctx: LoopStepHookContext) => Promise<BeforeStepResult | undefined>;

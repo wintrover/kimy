@@ -1,7 +1,9 @@
-import type { PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import type { PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import { BasePermissionPolicy } from '../base-policy';
 
-export class AgentSwarmExclusiveDenyPermissionPolicy implements PermissionPolicy {
+export class AgentSwarmExclusiveDenyPermissionPolicy extends BasePermissionPolicy {
   readonly name = 'agent-swarm-exclusive-deny';
+  readonly category = 'deny' as const;
 
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
     const toolCalls = context.toolCalls;
@@ -11,6 +13,15 @@ export class AgentSwarmExclusiveDenyPermissionPolicy implements PermissionPolicy
 
     if (agentSwarmCount === 0) return;
     if (agentSwarmCount === 1 && toolCalls.length === 1) return;
+
+    const mixedBatchDetected = agentSwarmCount >= 1 && toolCalls.length > 1;
+    if (mixedBatchDetected) {
+      context.virtualTurnTrigger = {
+        reason: 'agent-swarm-mixed-batch',
+        message:
+          'AgentSwarm must be the sole tool call. Regenerate with AgentSwarm alone.',
+      };
+    }
 
     return {
       kind: 'deny',

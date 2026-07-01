@@ -1,12 +1,14 @@
 import type { Agent } from '..';
 import type { PrepareToolExecutionResult } from '../../loop';
-import { createPermissionDecisionPolicies } from './policies';
+import { createPermissionPipeline } from './policies';
+import type { PermissionPipeline } from './pipeline';
 import type {
   ApprovalResponse,
   PermissionApprovalResultRecord,
   PermissionData,
   PermissionMode,
   PermissionPolicy,
+  PermissionPolicyCategory,
   PermissionPolicyContext,
   PermissionPolicyResolution,
   PermissionPolicyResult,
@@ -14,6 +16,18 @@ import type {
 } from './types';
 
 export * from './types';
+
+/**
+ * Declarative mode matrix — maps each permission mode to the set of policy
+ * categories that should be evaluated. Adding a new category to
+ * `PermissionPolicyCategory` forces a compile error here, guaranteeing that
+ * every category is explicitly allowed or disallowed per mode.
+ */
+const POLICY_EXECUTION_MATRIX: Record<PermissionMode, Record<PermissionPolicyCategory, boolean>> = {
+  manual: { deny: true, approve: true, ask_resource: true, ask_lifecycle: true },
+  auto:   { deny: true, approve: true, ask_resource: true, ask_lifecycle: true },
+  yolo:   { deny: true, approve: true, ask_resource: false, ask_lifecycle: true },
+};
 
 export interface PermissionManagerOptions {
   readonly initialRules?: readonly PermissionRule[];
@@ -26,8 +40,19 @@ interface PolicyEvaluation {
 }
 
 export class PermissionManager {
-  readonly policies: PermissionPolicy[];
+  readonly pipeline: PermissionPipeline;
   readonly rules: PermissionRule[] = [];
+
+  /**
+   * Mutable policy list — proxies to the guards layer.
+   *
+   * Backward-compatible accessor used by callers that inject runtime deny
+   * policies (e.g. btw subagents). Adding to the guards layer ensures the
+   * injected policy fires before any overrides or fallbacks.
+   */
+  get policies(): PermissionPolicy[] {
+    return this.pipeline.guards.policies;
+  }
   private modeOverride: PermissionMode | undefined;
   private readonly parent: PermissionManager | undefined;
   private readonly localSessionApprovalRulePatterns = new Set<string>();
@@ -38,7 +63,7 @@ export class PermissionManager {
   ) {
     this.rules = [...(options.initialRules ?? [])];
     this.parent = options.parent;
-    this.policies = createPermissionDecisionPolicies(this.agent);
+    this.pipeline = createPermissionPipeline(this.agent);
   }
 
   get mode(): PermissionMode {
@@ -250,11 +275,47 @@ export class PermissionManager {
   private async evaluatePolicies(
     context: PermissionPolicyContext,
   ): Promise<PolicyEvaluation | undefined> {
-    for (const policy of this.policies) {
-      const result = await policy.evaluate(context);
-      if (result !== undefined) {
-        return { policyName: policy.name, result };
+    const modeGate = POLICY_EXECUTION_MATRIX[this.mode];
+    const layers = [this.pipeline.guards, this.pipeline.overrides, this.pipeline.fallbacks];
+
+    for (const layer of layers) {
+      const activePolicies = layer.policies.filter((p) => modeGate[p.category]);
+
+      // Parallel evaluation — evaluate() is side-effect-free so temporal
+      // ordering has no influence on the result.
+      const evaluated = await Promise.all(
+        activePolicies.map(async (policy) => {
+          const result = await policy.evaluate(context);
+          return result !== undefined ? { policyName: policy.name, result } : null;
+        }),
+      );
+      const decisions = evaluated.filter(
+        (d): d is NonNullable<typeof d> => d !== null,
+      );
+
+      if (decisions.length === 0) continue;
+
+      // Combining algorithm deterministically selects the winning decision kind.
+      const combined = layer.combine(decisions);
+      if (combined === undefined) continue;
+
+      // Tie-handling: call onSelected() for every policy whose result kind
+      // matches the winner, so no side-effect is missed regardless of array order.
+      const winners = decisions.filter((d) => d.result.kind === combined.kind);
+      for (const winner of winners) {
+        const policy = activePolicies.find((p) => p.name === winner.policyName);
+        policy?.onSelected?.(context, winner.result);
       }
+
+      // Return the primary winner. For ask policies, at most one matches per
+      // tool call, so there is no ambiguity in resolveApproval selection.
+      const primary = winners[0]!;
+      return { policyName: primary.policyName, result: primary.result };
+    }
+
+    // yolo mode: if no deny policy fired, auto-approve.
+    if (this.mode === 'yolo') {
+      return { policyName: 'yolo-auto-approve', result: { kind: 'approve' } };
     }
     return undefined;
   }

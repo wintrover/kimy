@@ -30,6 +30,7 @@ import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import { resolvePathAccessPath } from '../../policies/path-access';
 import type { PathClass } from '../../policies/path-access';
 import { isSensitiveFile, SENSITIVE_DOT_VARIANT_SUFFIXES } from '../../policies/sensitive';
+import { createAjvValidateArgs } from '../../args-validator';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { ensureRgPath, rgUnavailableMessage } from '../../support/rg-locator';
 import { literalRulePattern, matchesGlobRuleSubject } from '../../support/rule-match';
@@ -181,6 +182,8 @@ export class GrepTool implements BuiltinTool<GrepInput> {
   readonly name = 'Grep' as const;
   readonly description = GREP_DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(GrepInputSchema);
+  private readonly _validateArgs = createAjvValidateArgs(this.parameters);
+  validateArgs(args: unknown) { return this._validateArgs(args); }
   constructor(
     private readonly kaos: Kaos,
     private readonly workspace: WorkspaceConfig,

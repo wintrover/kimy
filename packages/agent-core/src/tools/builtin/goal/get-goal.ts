@@ -9,6 +9,7 @@ import { z } from 'zod';
 
 import type { BuiltinTool } from '../../../agent/tool';
 import type { ToolExecution } from '../../../loop/types';
+import { createAjvValidateArgs } from '../../args-validator';
 import { toInputJsonSchema } from '../../support/input-schema';
 import DESCRIPTION from './get-goal.md?raw';
 import { goalResultForModel } from './serialize';
@@ -20,6 +21,8 @@ export class GetGoalTool implements BuiltinTool<GetGoalToolInput> {
   readonly name = 'GetGoal' as const;
   readonly description: string = DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(GetGoalToolInputSchema);
+  private readonly _validateArgs = createAjvValidateArgs(this.parameters);
+  validateArgs(args: unknown) { return this._validateArgs(args); }
 
   constructor(private readonly agent: Agent) {}
 

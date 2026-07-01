@@ -1,10 +1,14 @@
 import type { Agent } from '../..';
-import type { PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import type { PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import { BasePermissionPolicy } from '../base-policy';
 
-export class AutoModeAskUserQuestionDenyPermissionPolicy implements PermissionPolicy {
+export class AutoModeAskUserQuestionDenyPermissionPolicy extends BasePermissionPolicy {
   readonly name = 'auto-mode-ask-user-question-deny';
+  readonly category = 'deny' as const;
 
-  constructor(private readonly agent: Agent) {}
+  constructor(private readonly agent: Agent) {
+    super();
+  }
 
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
     if (this.agent.permission.mode !== 'auto') return;

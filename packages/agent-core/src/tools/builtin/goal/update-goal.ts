@@ -23,6 +23,7 @@ import {
 } from './outcome-prompts';
 import type { BuiltinTool } from '../../../agent/tool';
 import type { ToolExecution } from '../../../loop/types';
+import { createAjvValidateArgs } from '../../args-validator';
 import { toInputJsonSchema } from '../../support/input-schema';
 import DESCRIPTION from './update-goal.md?raw';
 
@@ -40,6 +41,8 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
   readonly name = 'UpdateGoal' as const;
   readonly description: string = DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(UpdateGoalToolInputSchema);
+  private readonly _validateArgs = createAjvValidateArgs(this.parameters);
+  validateArgs(args: unknown) { return this._validateArgs(args); }
 
   constructor(private readonly agent: Agent) {}
 

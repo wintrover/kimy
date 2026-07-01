@@ -88,6 +88,7 @@ describe('refreshAllProviderModels', () => {
       },
       defaultModel: 'kimi-code/kimi-for-coding',
       telemetry: true,
+      agentRole: 'default',
     };
     vi.stubEnv('KIMI_CODE_BASE_URL', envBaseUrl);
     vi.stubEnv('KIMI_CODE_OAUTH_HOST', envOauthHost);
@@ -165,6 +166,7 @@ describe('refreshAllProviderModels', () => {
       },
       defaultModel: 'kimi-code/kimi-for-coding',
       telemetry: true,
+      agentRole: 'default',
     };
     const host = makeRefreshHost(config);
     const resolveOAuthToken = vi.fn(async () => 'oauth-access-token');

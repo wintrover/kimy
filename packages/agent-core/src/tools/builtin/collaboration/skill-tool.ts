@@ -22,6 +22,7 @@ import type { BuiltinTool } from '../../../agent/tool';
 import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import { isInlineSkillType, type SkillDefinition } from '../../../skill';
 import { renderPrompt } from '../../../utils/render-prompt';
+import { createAjvValidateArgs } from '../../args-validator';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { matchesGlobRuleSubject } from '../../support/rule-match';
 import skillDescriptionTemplate from './skill-tool.md?raw';
@@ -71,6 +72,8 @@ export class SkillTool implements BuiltinTool<SkillToolInput> {
     MAX_SKILL_QUERY_DEPTH,
   });
   readonly parameters: Record<string, unknown> = toInputJsonSchema(SkillToolInputSchema);
+  private readonly _validateArgs = createAjvValidateArgs(this.parameters);
+  validateArgs(args: unknown) { return this._validateArgs(args); }
 
   constructor(
     private readonly agent: Agent,

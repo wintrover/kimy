@@ -27,6 +27,7 @@ import {
   handleEditorCommand,
   handleModelCommand,
   handlePlanCommand,
+  handleSubmodelCommand,
   handleThemeCommand,
   handleYoloCommand,
   showExperimentsPanel,
@@ -67,6 +68,7 @@ export {
   handleEditorCommand,
   handleModelCommand,
   handlePlanCommand,
+  handleSubmodelCommand,
   handleThemeCommand,
   handleYoloCommand,
   showModelPicker,
@@ -269,6 +271,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'model':
       await handleModelCommand(host, args);
+      return;
+    case 'submodel':
+      await handleSubmodelCommand(host, args);
       return;
     case 'provider':
       await handleProviderCommand(host);

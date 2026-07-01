@@ -34,9 +34,6 @@ import { createCliTelemetryBootstrap, initializeCliTelemetry } from './cli/telem
 import { runUpdatePreflight } from './cli/update/preflight';
 import { createKimiCodeHostIdentity, getVersion } from './cli/version';
 import { CLI_SHUTDOWN_TIMEOUT_MS, CLI_UI_MODE, PROCESS_NAME } from './constant/app';
-import { cleanupStaleNativeCacheForCurrent } from './native/native-assets';
-import { installNativeModuleHook } from './native/module-hook';
-import { runNativeAssetSmokeIfRequested } from './native/smoke';
 
 export async function handleMainCommand(opts: CLIOptions, version: string): Promise<void> {
   let validated: ReturnType<typeof validateOptions>;
@@ -109,6 +106,7 @@ const MIGRATE_CLI_OPTIONS: CLIOptions = {
   yolo: false,
   auto: false,
   plan: false,
+  orchestrator: false,
   model: undefined,
   outputFormat: undefined,
   prompt: undefined,
@@ -122,17 +120,6 @@ export function main(): void {
   // before any client is constructed. No-op when no proxy variable is set; an
   // invalid proxy URL is reported and ignored rather than aborting startup.
   installGlobalProxyDispatcher();
-  installNativeModuleHook();
-  if (runNativeAssetSmokeIfRequested()) return;
-
-  // Start the background cleanup of stale native cache. Fire-and-forget; must not block startup or throw.
-  queueMicrotask(() => {
-    try {
-      cleanupStaleNativeCacheForCurrent();
-    } catch {
-      // ignore: cache GC must never affect process startup
-    }
-  });
 
   const version = getVersion();
 

@@ -104,7 +104,7 @@ describe('Agent turn flow', () => {
     expect(records).toContainEqual({
       event: 'permission_policy_decision',
       properties: expect.objectContaining({
-        policy_name: 'yolo-mode-approve',
+        policy_name: 'yolo-auto-approve',
         tool_name: 'Bash',
         permission_mode: 'yolo',
         decision: 'approve',
@@ -1181,6 +1181,7 @@ describe('Agent turn flow', () => {
     const ctx = testAgent({
       initialConfig: {
         providers: {},
+        agentRole: 'default',
         loopControl: { maxStepsPerTurn: 1 },
       },
       kaos: createCommandKaos('loop-output'),
@@ -1798,6 +1799,7 @@ function singleAttemptAgentOptions(): Pick<TestAgentOptions, 'initialConfig'> {
   return {
     initialConfig: {
       providers: {},
+      agentRole: 'default',
       loopControl: { maxRetriesPerStep: 1 },
     },
   };
@@ -1857,6 +1859,7 @@ function oauthAgentOptions(
   return {
     initialConfig: {
       defaultModel: 'kimi-code',
+      agentRole: 'default',
       providers: {
         'managed:kimi-code': {
           type: 'vertexai',

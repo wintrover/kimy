@@ -1,11 +1,15 @@
 import type { Agent } from '../..';
-import type { PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import type { PermissionPolicyContext, PermissionPolicyResult } from '../types';
 import { writeFileAccesses } from './file-access-ask';
+import { BasePermissionPolicy } from '../base-policy';
 
-export class PlanModeGuardDenyPermissionPolicy implements PermissionPolicy {
+export class PlanModeGuardDenyPermissionPolicy extends BasePermissionPolicy {
   readonly name = 'plan-mode-guard-deny';
+  readonly category = 'deny' as const;
 
-  constructor(private readonly agent: Agent) {}
+  constructor(private readonly agent: Agent) {
+    super();
+  }
 
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
     if (!this.agent.planMode.isActive) return;

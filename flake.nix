@@ -5,6 +5,14 @@
     # Pinned to the 25.11 release channel because nixpkgs-unstable currently
     # ships nodejs_24 = 24.14.1, which trips the >= 24.15.0 floor that the
     # native SEA build enforces (see apps/kimi-code/scripts/native/build.mjs).
+    #
+    # Update when:
+    #   1. nixos-25.11's nodejs_24 version is confirmed >= 24.15.0, OR
+    #   2. The project's minimum Node.js version is lowered,
+    #   3. A newer nixos-* branch is needed for other reasons.
+    #
+    # To check: nix eval .#devShells.x86_64-linux.default.buildInputs
+    # or run: nix develop --command node --version
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
   };
 
@@ -246,7 +254,24 @@
               pnpm
               pkgs.ripgrep
               pkgs.fd
+              pkgs.just
+              pkgs.git
+              pkgs.coreutils
+              pkgs.gnutar
+              pkgs.gzip
             ];
+
+            env = {
+              KIMI_CODE_HERMETIC_BUILD = "1";
+            };
+
+            shellHook = ''
+              echo "🔒 Hermetic build environment active"
+              echo "   Node.js: $(node --version)"
+              echo "   pnpm:    $(pnpm --version)"
+              echo "   git:     $(git --version)"
+              echo "   just:    $(just --version)"
+            '';
           };
       });
     };

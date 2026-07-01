@@ -72,6 +72,7 @@ export interface OpenAILegacyOptions {
   stream?: boolean | undefined;
   maxTokens?: number | undefined;
   reasoningKey?: string | undefined;
+  reasoningEffort?: string | undefined;
   httpClient?: unknown;
   defaultHeaders?: Record<string, string>;
   toolMessageConversion?: ToolMessageConversion | undefined;
@@ -443,6 +444,7 @@ export class OpenAILegacyChatProvider implements ChatProvider {
   private _baseUrl: string | undefined;
   private _defaultHeaders: Record<string, string> | undefined;
   private _reasoningKey: string | undefined;
+  private _configReasoningEffort: string | undefined;
   private _reasoningEffort: string | undefined;
   private _generationKwargs: OpenAILegacyGenerationKwargs;
   private _toolMessageConversion: ToolMessageConversion;
@@ -466,6 +468,7 @@ export class OpenAILegacyChatProvider implements ChatProvider {
       normalizedReasoningKey !== undefined && normalizedReasoningKey.length > 0
         ? normalizedReasoningKey
         : undefined;
+    this._configReasoningEffort = options.reasoningEffort?.trim() || undefined;
     this._reasoningEffort = undefined;
     this._generationKwargs =
       options.maxTokens !== undefined ? completionTokenKwargs(this._model, options.maxTokens) : {};
@@ -517,6 +520,11 @@ export class OpenAILegacyChatProvider implements ChatProvider {
 
     // Determine reasoning_effort
     let reasoningEffort: string | undefined = this._reasoningEffort;
+
+    // Fallback to config default when thinking is active but effort not explicitly set
+    if (reasoningEffort === undefined) {
+      reasoningEffort = this._configReasoningEffort;
+    }
 
     // Auto-enable reasoning_effort when the history contains ThinkPart but reasoning
     // was not explicitly configured. This prevents server validation errors from APIs
@@ -574,9 +582,14 @@ export class OpenAILegacyChatProvider implements ChatProvider {
   }
 
   withThinking(effort: ThinkingEffort): OpenAILegacyChatProvider {
-    const reasoningEffort = thinkingEffortToReasoningEffort(effort);
     const clone = this._clone();
-    clone._reasoningEffort = reasoningEffort;
+    if (effort === 'off') {
+      clone._reasoningEffort = undefined;
+    } else if (clone._configReasoningEffort) {
+      clone._reasoningEffort = clone._configReasoningEffort;
+    } else {
+      clone._reasoningEffort = thinkingEffortToReasoningEffort(effort);
+    }
     return clone;
   }
 

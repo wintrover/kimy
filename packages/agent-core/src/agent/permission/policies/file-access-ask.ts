@@ -9,10 +9,12 @@ import {
   findGitWorkTreeMarker,
   type GitWorkTreeMarker,
 } from '../../../tools/support/git-worktree';
-import type { PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import { BasePermissionPolicy } from '../base-policy';
+import type { PermissionPolicyContext, PermissionPolicyResult } from '../types';
 
-export class SensitiveFileAccessAskPermissionPolicy implements PermissionPolicy {
+export class SensitiveFileAccessAskPermissionPolicy extends BasePermissionPolicy {
   readonly name = 'sensitive-file-access-ask';
+  readonly category = 'ask_resource' as const;
 
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
     const access = fileAccesses(context).find((fileAccess) =>
@@ -26,10 +28,13 @@ export class SensitiveFileAccessAskPermissionPolicy implements PermissionPolicy 
   }
 }
 
-export class GitControlPathAccessAskPermissionPolicy implements PermissionPolicy {
+export class GitControlPathAccessAskPermissionPolicy extends BasePermissionPolicy {
   readonly name = 'git-control-path-access-ask';
+  readonly category = 'ask_resource' as const;
 
-  constructor(private readonly agent: Agent) {}
+  constructor(private readonly agent: Agent) {
+    super();
+  }
 
   async evaluate(context: PermissionPolicyContext): Promise<PermissionPolicyResult | undefined> {
     const cwd = this.agent.config.cwd;

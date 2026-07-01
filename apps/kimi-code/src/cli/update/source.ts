@@ -1,40 +1,10 @@
 import { execFile } from 'node:child_process';
 import { realpathSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 
 import { getHostPackageRoot } from '#/cli/version';
 
 import { NPM_PACKAGE_NAME, type InstallSource } from './types';
-
-const nodeRequire = createRequire(import.meta.url);
-
-interface NodeSeaModule {
-  isSea(): boolean;
-}
-
-let cachedSea: NodeSeaModule | null | undefined;
-
-function loadSeaModule(): NodeSeaModule | null {
-  if (cachedSea !== undefined) return cachedSea;
-  try {
-    cachedSea = nodeRequire('node:sea') as NodeSeaModule;
-  } catch {
-    cachedSea = null;
-  }
-  return cachedSea;
-}
-
-/** Runtime SEA detection — true when running as a packaged native binary. */
-export function detectNativeInstall(): boolean {
-  const sea = loadSeaModule();
-  if (sea === null) return false;
-  try {
-    return sea.isSea();
-  } catch {
-    return false;
-  }
-}
 
 // Path heuristic markers (compared in lowercase; both forward and backward slashes accepted).
 const PNPM_PATH_SEGMENT = 'pnpm/global/';
@@ -68,7 +38,6 @@ export function classifyByPathHeuristic(packageRoot: string): InstallSource | nu
 export interface DetectInstallSourceDeps {
   readonly getPackageRoot: () => string;
   readonly getGlobalPrefix: () => Promise<string>;
-  readonly detectNative: () => boolean;
   readonly platform: NodeJS.Platform;
 }
 
@@ -141,11 +110,8 @@ export async function detectInstallSource(
     getGlobalPrefix:
       deps.getGlobalPrefix ??
       (() => execFileText(npmCommand(platform), ['prefix', '-g']).then((text) => text.trim())),
-    detectNative: deps.detectNative ?? detectNativeInstall,
     platform,
   };
-
-  if (resolved.detectNative()) return 'native';
 
   const packageRoot = resolved.getPackageRoot();
   const heuristic = classifyByPathHeuristic(packageRoot);

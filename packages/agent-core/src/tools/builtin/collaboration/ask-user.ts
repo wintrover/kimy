@@ -26,6 +26,7 @@ import type {
   QuestionResult,
 } from '../../../rpc';
 import type { TelemetryPropertyValue } from '../../../telemetry';
+import { createAjvValidateArgs } from '../../args-validator';
 import { toInputJsonSchema } from '../../support/input-schema';
 import DESCRIPTION from './ask-user.md?raw';
 
@@ -98,10 +99,13 @@ export class AskUserQuestionTool implements BuiltinTool<AskUserQuestionInput> {
   readonly name = 'AskUserQuestion' as const;
   readonly description: string;
   readonly parameters: Record<string, unknown>;
+  private _validateArgs!: ReturnType<typeof createAjvValidateArgs>;
+  validateArgs(args: unknown) { return this._validateArgs(args); }
 
   constructor(private readonly agent: Agent) {
     this.description = `${DESCRIPTION}- Set background=true when you can keep working without the answer. This starts a background question task and returns a task_id immediately. The answer arrives automatically in a later turn — you do not need to poll, sleep, or check on it. Continue with other work; never fabricate or predict the answer.`;
     this.parameters = toInputJsonSchema(this.inputSchema());
+    this._validateArgs = createAjvValidateArgs(this.parameters);
   }
 
   resolveExecution(args: AskUserQuestionInput): ToolExecution {

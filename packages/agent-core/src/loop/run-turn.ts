@@ -108,6 +108,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
         stepNumber: steps,
         usage: stepResult.usage,
         stopReason: terminalStopReason,
+        virtualTurn: stepResult.virtualTurn,
         signal,
         llm,
       });

@@ -14,6 +14,7 @@ import type { BuiltinTool } from '../../../agent/tool';
 import { ToolAccesses } from '../../../loop/tool-access';
 import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import { resolvePathAccessPath } from '../../policies/path-access';
+import { createAjvValidateArgs } from '../../args-validator';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
 import type { WorkspaceConfig } from '../../support/workspace';
@@ -55,6 +56,8 @@ export class WriteTool implements BuiltinTool<WriteInput> {
   readonly name = 'Write' as const;
   readonly description = WRITE_DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(WriteInputSchema);
+  private readonly _validateArgs = createAjvValidateArgs(this.parameters);
+  validateArgs(args: unknown) { return this._validateArgs(args); }
 
   constructor(
     private readonly kaos: Kaos,

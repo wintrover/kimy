@@ -1,9 +1,13 @@
-import type { PermissionPolicy, PermissionPolicyResult } from '../types';
+import type { PermissionPolicyResult } from '../types';
+import { BasePermissionPolicy } from '../base-policy';
 
-export class DenyAllPermissionPolicy implements PermissionPolicy {
+export class DenyAllPermissionPolicy extends BasePermissionPolicy {
   readonly name = 'deny-all';
+  readonly category = 'deny' as const;
 
-  constructor(private readonly message: string) {}
+  constructor(private readonly message: string) {
+    super();
+  }
 
   evaluate(): PermissionPolicyResult {
     return {

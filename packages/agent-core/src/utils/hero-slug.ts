@@ -252,16 +252,18 @@ function assembleSlug(): string {
 
 export function generateHeroSlug(id: string, existing: Set<string>): string {
   let slug = '';
-  let collided = true;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     slug = assembleSlug();
     if (!existing.has(slug)) {
-      collided = false;
-      break;
+      return slug;
     }
   }
-  if (collided) {
-    slug = `${slug}-${id.slice(0, 8)}`;
+  // All attempts collided — use UUID suffix for disambiguation
+  const suffix = id.slice(0, 8);
+  const suffixed = `${slug}-${suffix}`;
+  if (!existing.has(suffixed)) {
+    return suffixed;
   }
-  return slug;
+  // Extreme edge case: suffix also collided — use longer UUID slice
+  return `${slug}-${id.slice(0, 16)}`;
 }

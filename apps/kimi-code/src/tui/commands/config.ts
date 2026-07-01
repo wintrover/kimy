@@ -23,6 +23,7 @@ import { formatErrorMessage } from '../utils/event-payload';
 import { showUsage } from './info';
 import { setExperimentalFeatures } from './experimental-flags';
 import type { SlashCommandHost } from './dispatch';
+import { isThinkingModel } from '#/tui/utils/model-capabilities';
 
 // ---------------------------------------------------------------------------
 // Plan / Config commands
@@ -210,6 +211,31 @@ export async function handleModelCommand(host: SlashCommandHost, args: string): 
     return;
   }
   showModelPicker(host, alias);
+}
+
+export async function handleSubmodelCommand(
+  host: SlashCommandHost,
+  args: string,
+): Promise<void> {
+  const alias = args.trim();
+  await refreshModelsForPicker(host);
+
+  if (alias.length === 0 || alias === 'inherit') {
+    showSubmodelPicker(host, alias === 'inherit' ? '' : undefined);
+    return;
+  }
+
+  if (host.state.appState.availableModels[alias] === undefined) {
+    const suggestion = findSimilarModel(alias, host.state.appState.availableModels);
+    if (suggestion) {
+      host.showError(`Unknown model alias: "${alias}". Did you mean "${suggestion}"?`);
+    } else {
+      host.showError(`Unknown model alias: "${alias}". Use /submodel to open the picker.`);
+    }
+    return;
+  }
+
+  showSubmodelPicker(host, alias);
 }
 
 // ---------------------------------------------------------------------------
@@ -402,6 +428,111 @@ async function persistModelSelection(host: SlashCommandHost, alias: string, thin
     defaultThinking: thinking,
   });
   return true;
+}
+
+function showSubmodelPicker(
+  host: SlashCommandHost,
+  selectedValue?: string,
+): void {
+  const entries = Object.entries(host.state.appState.availableModels);
+  if (entries.length === 0) {
+    host.showNotice(
+      'No models configured',
+      'Run /login to sign in to Kimi, or /provider to add another provider from a model catalog.',
+    );
+    return;
+  }
+
+  host.mountEditorReplacement(
+    new TabbedModelSelectorComponent({
+      models: host.state.appState.availableModels,
+      currentValue: host.state.appState.subagentModel ?? '',
+      selectedValue: selectedValue ?? host.state.appState.subagentModel ?? '',
+      currentThinking: isThinkingModel(host.state.appState.subagentModel, host.state.appState.availableModels),
+      onSelect: ({ alias }) => {
+        host.restoreEditor();
+        void performSubmodelSwitch(host, alias, true);
+      },
+      onCancel: () => {
+        host.restoreEditor();
+      },
+    }),
+  );
+}
+
+async function performSubmodelSwitch(
+  host: SlashCommandHost,
+  alias: string,
+  persist: boolean,
+): Promise<void> {
+  const isInherit = alias === '';
+
+  if (!isInherit && host.state.appState.availableModels[alias] === undefined) {
+    host.showError(`Unknown model alias: "${alias}"`);
+    return;
+  }
+
+  host.setAppState({ subagentModel: isInherit ? undefined : alias });
+
+  if (persist) {
+    try {
+      await host.harness.setConfig({
+        subagentModel: isInherit ? undefined : alias,
+      });
+    } catch (error) {
+      const msg = formatErrorMessage(error);
+      host.showError(
+        isInherit
+          ? `Sub-agent model reset to inherit, but failed to save: ${msg}`
+          : `Sub-agent model set to ${alias}, but failed to save: ${msg}`,
+      );
+      return;
+    }
+  }
+
+  const status = isInherit
+    ? persist
+      ? 'Sub-agent model reset to inherit from parent.'
+      : 'Sub-agent model reset to inherit for this session only.'
+    : persist
+      ? `Sub-agent model set to ${alias}.`
+      : `Sub-agent model set to ${alias} for this session only.`;
+
+  host.showStatus(status);
+}
+
+function levenshtein(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i]![0] = i;
+  for (let j = 0; j <= n; j++) dp[0]![j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i]![j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1]![j - 1]!
+        : 1 + Math.min(dp[i - 1]![j]!, dp[i]![j - 1]!, dp[i - 1]![j - 1]!);
+    }
+  }
+  return dp[m]![n]!;
+}
+
+function findSimilarModel(
+  input: string,
+  available: Record<string, unknown>,
+): string | null {
+  const keys = Object.keys(available);
+  const lowerInput = input.toLowerCase();
+  let best: string | null = null;
+  let bestDist = 3; // threshold: only suggest if distance ≤ 2
+  for (const key of keys) {
+    const dist = levenshtein(lowerInput, key.toLowerCase());
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = key;
+    }
+  }
+  return best;
 }
 
 function showThemePicker(host: SlashCommandHost): void {

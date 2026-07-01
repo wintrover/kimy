@@ -45,6 +45,7 @@ import { z } from 'zod';
 import type { BuiltinTool } from '../../agent/tool';
 import type { CronManager } from '../../agent/cron';
 import type { ToolExecution } from '../../loop/types';
+import { createAjvValidateArgs } from '../args-validator';
 import { toInputJsonSchema } from '../support/input-schema';
 import {
   cronToHuman,
@@ -91,6 +92,8 @@ export class CronListTool implements BuiltinTool<CronListInput> {
   readonly parameters: Record<string, unknown> = toInputJsonSchema(
     CronListInputSchema,
   );
+  private readonly _validateArgs = createAjvValidateArgs(this.parameters);
+  validateArgs(args: unknown) { return this._validateArgs(args); }
 
   constructor(private readonly manager: CronManager) {}
 

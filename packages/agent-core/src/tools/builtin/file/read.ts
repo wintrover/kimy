@@ -1,15 +1,14 @@
 import type { Kaos, StatResult } from '@moonshot-ai/kaos';
 import { z } from 'zod';
 
-import type { BuiltinTool } from '../../../agent/tool';
 import { ToolAccesses } from '../../../loop/tool-access';
 import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import { renderPrompt } from '../../../utils/render-prompt';
 import { resolvePathAccessPath } from '../../policies/path-access';
 import { MEDIA_SNIFF_BYTES, detectFileType } from '../../support/file-type';
-import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
 import type { WorkspaceConfig } from '../../support/workspace';
+import { ZodToolBase } from '../../support/zod-tool-base';
 import { makeCarriageReturnsVisible, type LineEndingStyle } from './line-endings';
 import readDescriptionTemplate from './read.md?raw';
 
@@ -19,22 +18,22 @@ export const MAX_BYTES: number = 100 * 1024;
 const S_IFMT = 0o170000;
 const S_IFREG = 0o100000;
 
-const PositiveLineOffsetSchema = z.number().int().min(1);
-const TailLineOffsetSchema = z.number().int().min(-MAX_LINES).max(-1);
-
 export const ReadInputSchema = z.object({
   path: z
     .string()
     .describe(
       'Path to a text file. Relative paths resolve against the working directory; a path outside the working directory must be absolute. Directories are not supported; use `ls` via Bash for a known directory, or Glob for pattern search.',
     ),
-  line_offset: z
-    .union([PositiveLineOffsetSchema, TailLineOffsetSchema])
+  line_offset: z.coerce
+    .number()
+    .int()
+    .min(-MAX_LINES)
+    .refine((v) => v !== 0, { message: 'line_offset cannot be 0; use 1 for the first line or -1 for the last line' })
     .optional()
     .describe(
       `The line number to start reading from. Omit to start at line 1. Negative values read from the end of the file; the absolute value cannot exceed ${String(MAX_LINES)}.`,
     ),
-  n_lines: z
+  n_lines: z.coerce
     .number()
     .int()
     .positive()
@@ -231,14 +230,19 @@ const READ_DESCRIPTION = renderPrompt(readDescriptionTemplate, {
   MAX_LINE_LENGTH,
 });
 
-export class ReadTool implements BuiltinTool<ReadInput> {
+export class ReadTool extends ZodToolBase<typeof ReadInputSchema> {
   readonly name = 'Read' as const;
   readonly description = READ_DESCRIPTION;
-  readonly parameters: Record<string, unknown> = toInputJsonSchema(ReadInputSchema);
+  readonly schema = ReadInputSchema;
+  readonly metadata = {
+    paramAliases: { offset: 'line_offset' },
+  } as const;
   constructor(
     private readonly kaos: Kaos,
     private readonly workspace: WorkspaceConfig,
-  ) {}
+  ) {
+    super();
+  }
 
   resolveExecution(args: ReadInput): ToolExecution {
     const path = resolvePathAccessPath(args.path, {
@@ -291,7 +295,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
         };
       }
 
-      const lineOffset = args.line_offset ?? 1;
+      const lineOffset = (args.line_offset ?? 1) || 1;
       const requestedLines = args.n_lines ?? MAX_LINES;
       const effectiveLimit = Math.min(requestedLines, MAX_LINES);
 

@@ -1,0 +1,34 @@
+name: delegator
+extends: agent
+type: orchestrator
+temperature: 0.0
+seed: 42
+promptVars:
+  roleAdditional: |
+    You are an orchestrator. Delegate all coding/exploration to sub-agents.
+    Use Read/Glob/Grep only for brief context gathering.
+tools:
+  - Read
+  - ReadMediaFile
+  - Glob
+  - Grep
+  - WebSearch
+  - FetchURL
+  - Agent
+  - AgentSwarm
+  - TaskList
+  - TaskOutput
+  - TaskStop
+  - AskUserQuestion
+  - EnterPlanMode
+  - ExitPlanMode
+  - TodoList
+  - Skill
+  - CronCreate
+  - CronList
+  - CronDelete
+  - CreateGoal
+  - GetGoal
+  - SetGoalBudget
+  - UpdateGoal
+  - mcp__*

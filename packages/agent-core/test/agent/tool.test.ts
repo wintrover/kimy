@@ -269,6 +269,99 @@ describe('Agent tools', () => {
     expect(ctx.agent.tools.loopTools.some((tool) => tool.name === 'AgentSwarm')).toBe(true);
   });
 
+  it('hides leaf tools from loopTools when swarm mode is active', () => {
+    const subagentHost = {} as unknown as SessionSubagentHost;
+
+    const ctx = testAgent({ subagentHost });
+    ctx.configure({ tools: ['AgentSwarm', 'Agent', 'Read', 'Grep', 'Bash', 'TodoList'] });
+
+    // Without swarm mode, all enabled tools are visible
+    const toolNamesBefore = ctx.agent.tools.loopTools.map((t) => t.name);
+    expect(toolNamesBefore).toContain('AgentSwarm');
+    expect(toolNamesBefore).toContain('Read');
+    expect(toolNamesBefore).toContain('Grep');
+    expect(toolNamesBefore).toContain('Bash');
+    expect(toolNamesBefore).toContain('TodoList');
+
+    // Enter swarm mode
+    ctx.agent.swarmMode.enter('manual');
+
+    const toolNamesAfter = ctx.agent.tools.loopTools.map((t) => t.name);
+    expect(toolNamesAfter).toContain('AgentSwarm');
+    expect(toolNamesAfter).toContain('TodoList');
+    expect(toolNamesAfter).not.toContain('Read');
+    expect(toolNamesAfter).not.toContain('Grep');
+    expect(toolNamesAfter).not.toContain('Bash');
+  });
+
+  it('restores full tool set when swarm mode exits', () => {
+    const subagentHost = {} as unknown as SessionSubagentHost;
+
+    const ctx = testAgent({ subagentHost });
+    ctx.configure({ tools: ['AgentSwarm', 'Agent', 'Read', 'Grep', 'Bash'] });
+
+    ctx.agent.swarmMode.enter('manual');
+    expect(ctx.agent.tools.loopTools.map((t) => t.name)).not.toContain('Read');
+
+    ctx.agent.swarmMode.exit();
+    const toolNamesAfterExit = ctx.agent.tools.loopTools.map((t) => t.name);
+    expect(toolNamesAfterExit).toContain('Read');
+    expect(toolNamesAfterExit).toContain('Grep');
+    expect(toolNamesAfterExit).toContain('Bash');
+  });
+
+  it('keeps all collaboration tools visible in swarm mode', () => {
+    const subagentHost = {} as unknown as SessionSubagentHost;
+
+    const ctx = testAgent({ subagentHost });
+    ctx.configure({
+      tools: [
+        'AgentSwarm', 'Agent', 'Skill', 'TodoList',
+        'EnterPlanMode', 'ExitPlanMode', 'AskUserQuestion',
+        'CronCreate', 'CronDelete', 'CronList',
+      ],
+    });
+
+    ctx.agent.swarmMode.enter('manual');
+
+    const toolNames = ctx.agent.tools.loopTools.map((t) => t.name);
+    expect(toolNames).toContain('AgentSwarm');
+    expect(toolNames).toContain('Agent');
+    expect(toolNames).toContain('TodoList');
+    expect(toolNames).toContain('EnterPlanMode');
+    expect(toolNames).toContain('ExitPlanMode');
+    expect(toolNames).toContain('AskUserQuestion');
+    expect(toolNames).toContain('CronCreate');
+    expect(toolNames).toContain('CronDelete');
+    expect(toolNames).toContain('CronList');
+  });
+
+  it('removeFromActiveTools removes tools from loopTools', () => {
+    const subagentHost = {} as unknown as SessionSubagentHost;
+    const ctx = testAgent({ subagentHost });
+    ctx.configure({ tools: ['AgentSwarm', 'Agent', 'Read', 'Bash'] });
+
+    expect(ctx.agent.tools.loopTools.map((t) => t.name)).toContain('AgentSwarm');
+
+    ctx.agent.tools.removeFromActiveTools(['AgentSwarm']);
+
+    expect(ctx.agent.tools.loopTools.map((t) => t.name)).not.toContain('AgentSwarm');
+    expect(ctx.agent.tools.loopTools.map((t) => t.name)).toContain('Agent');
+    expect(ctx.agent.tools.loopTools.map((t) => t.name)).toContain('Read');
+    expect(ctx.agent.tools.loopTools.map((t) => t.name)).toContain('Bash');
+  });
+
+  it('removeFromActiveTools is a no-op for names not in enabledTools', () => {
+    const ctx = testAgent();
+    ctx.configure({ tools: ['Read', 'Bash'] });
+
+    const before = ctx.agent.tools.loopTools.map((t) => t.name);
+    ctx.agent.tools.removeFromActiveTools(['AgentSwarm', 'Nonexistent']);
+    const after = ctx.agent.tools.loopTools.map((t) => t.name);
+
+    expect(after).toEqual(before);
+  });
+
   it('routes registered user tools through tool.call request/response', async () => {
     const lookupCall: ToolCall = {
       type: 'function',

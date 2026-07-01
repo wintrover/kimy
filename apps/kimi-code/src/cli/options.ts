@@ -7,6 +7,7 @@ export interface CLIOptions {
   yolo: boolean;
   auto: boolean;
   plan: boolean;
+  orchestrator: boolean;
   model: string | undefined;
   outputFormat: PromptOutputFormat | undefined;
   prompt: string | undefined;

@@ -14,9 +14,13 @@ const DOWN = `${ESC}[B`;
 const LEFT = `${ESC}[D`;
 const RIGHT = `${ESC}[C`;
 
-function model(displayName: string, capabilities: string[] = ['thinking']): ModelAlias {
+function model(
+  displayName: string,
+  capabilities: string[] = ['thinking'],
+  provider = 'managed:kimi-code',
+): ModelAlias {
   return {
-    provider: 'managed:kimi-code',
+    provider,
     model: displayName.toLowerCase().replaceAll(' ', '-'),
     maxContextSize: 200_000,
     displayName,
@@ -191,6 +195,27 @@ describe('ModelSelectorComponent', () => {
     expect(text(picker)).toContain('[ On ]');
     picker.handleInput('\r');
     expect(onSelect).toHaveBeenCalledWith({ alias: 'other', thinking: true });
+  });
+
+  it('marks isDuplicate true when the same name appears under multiple providers, false when unique', () => {
+    // Two different providers expose a model with the same display name — both
+    // should be flagged duplicates in createModelChoices().
+    const dupModels: Record<string, ModelAlias> = {
+      'openai/gpt-5': { ...model('GPT-5'), provider: 'openai' } as unknown as ModelAlias,
+      'azure/gpt-5': { ...model('GPT-5'), provider: 'azure' } as unknown as ModelAlias,
+      'anthropic/sonnet': { ...model('Claude Sonnet'), provider: 'anthropic' } as unknown as ModelAlias,
+    };
+    const picker = new ModelSelectorComponent({
+      models: dupModels,
+      currentValue: 'openai/gpt-5',
+      currentThinking: false,
+      onSelect: vi.fn(),
+      onCancel: vi.fn(),
+    });
+    const out = text(picker);
+    expect(out).toContain('[openai]');
+    expect(out).toContain('[azure]');
+    expect(out).not.toContain('[anthropic]');
   });
 
   it('fuzzy-filters by typing and reports a match count', () => {

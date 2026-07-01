@@ -29,6 +29,7 @@ import { ProcessBackgroundTask, type BackgroundManager } from '../../../agent/ba
 import type { BuiltinTool } from '../../../agent/tool';
 import type { ExecutableToolResult, ToolExecution, ToolUpdate } from '../../../loop/types';
 import { renderPrompt } from '../../../utils/render-prompt';
+import { createAjvValidateArgs } from '../../args-validator';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesGlobRuleSubject } from '../../support/rule-match';
 import {
@@ -154,6 +155,8 @@ export class BashTool implements BuiltinTool<BashInput> {
   readonly name = 'Bash' as const;
   readonly description: string;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(BashInputSchema);
+  private readonly _validateArgs = createAjvValidateArgs(this.parameters);
+  validateArgs(args: unknown) { return this._validateArgs(args); }
 
   private readonly isWindowsBash: boolean;
 

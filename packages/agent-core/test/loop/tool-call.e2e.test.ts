@@ -262,6 +262,7 @@ describe('runTurn — tool-call behaviour', () => {
       name: 'undef',
       description: 'returns undefined',
       parameters: { type: 'object', additionalProperties: true },
+      validateArgs: (args: unknown) => ({ success: true as const, data: args }),
       resolveExecution: () => ({
         approvalRule: 'undef',
         execute: async () => undefined as unknown as ExecutableToolResult,
@@ -287,6 +288,7 @@ describe('runTurn — tool-call behaviour', () => {
       name: 'noout',
       description: 'returns {}',
       parameters: { type: 'object', additionalProperties: true },
+      validateArgs: (args: unknown) => ({ success: true as const, data: args }),
       resolveExecution: () => ({
         approvalRule: 'noout',
         execute: async () => ({}) as ExecutableToolResult,
@@ -310,6 +312,7 @@ describe('runTurn — tool-call behaviour', () => {
       name: 'undef',
       description: 'returns undefined',
       parameters: { type: 'object', additionalProperties: true },
+      validateArgs: (args: unknown) => ({ success: true as const, data: args }),
       resolveExecution: () => ({
         approvalRule: 'undef',
         execute: async () => undefined as unknown as ExecutableToolResult,
@@ -707,6 +710,7 @@ class PathLockedGatedTool implements ExecutableTool<PathLockedInput> {
     required: ['path'],
     additionalProperties: false,
   };
+  validateArgs(args: unknown) { return { success: true as const, data: args }; }
   readonly calls: Array<{ readonly id: string; readonly args: PathLockedInput }> = [];
   readonly startedIds: string[] = [];
 
@@ -763,6 +767,7 @@ class PathSecurityTool implements ExecutableTool<Record<string, unknown>> {
     type: 'object',
     additionalProperties: true,
   };
+  validateArgs(args: unknown) { return { success: true as const, data: args }; }
 
   resolveExecution(): ToolExecution {
     throw new PathSecurityError(
@@ -781,6 +786,7 @@ class StopSuccessTool implements ExecutableTool<Record<string, unknown>> {
     type: 'object',
     additionalProperties: true,
   };
+  validateArgs(args: unknown) { return { success: true as const, data: args }; }
   readonly calls: Array<{ readonly id: string }> = [];
 
   resolveExecution(): ToolExecution {

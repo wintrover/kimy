@@ -74,10 +74,10 @@ export class PlanBoxComponent implements Component {
     const indent = ' '.repeat(LEFT_MARGIN);
 
     const title = this.buildTitle(horzLen);
+    const top = indent + paint('┌' + '─'.repeat(horzLen) + '┐');
     const trailingDashLen = Math.max(0, horzLen - visibleWidth(title));
-    const top =
-      indent + paint('┌') + paint(title) + paint('─'.repeat(trailingDashLen)) + paint('┐');
-    const bottom = indent + paint('└' + '─'.repeat(horzLen) + '┘');
+    const bottom =
+      indent + paint('└') + paint(title) + paint('─'.repeat(trailingDashLen)) + paint('┘');
 
     const rawLines = this.markdown.render(contentWidth);
 

@@ -7,6 +7,10 @@ import { createCommandKaos, testAgent } from './harness/agent';
 function createPlanKaos(overrides: Parameters<typeof createFakeKaos>[0] = {}) {
   return createFakeKaos({
     mkdir: vi.fn().mockResolvedValue(undefined),
+    iterdir: vi.fn(() => {
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    }),
+    stat: vi.fn().mockResolvedValue({ stMtime: Date.now() / 1000, stMode: 0o040755 } as any),
     ...overrides,
   });
 }
@@ -21,8 +25,12 @@ describe('manual plan entry', () => {
   it('enters plan mode without starting a model turn and prepares the plan directory', async () => {
     const mkdir = vi.fn().mockResolvedValue(undefined);
     const writeText = vi.fn().mockResolvedValue(0);
+    const iterdir = vi.fn(async function* (): AsyncGenerator<string> {
+      // empty plans directory
+    });
+    const stat = vi.fn().mockResolvedValue({ stMtime: Date.now() / 1000, stMode: 0o040755 } as any);
     const ctx = testAgent({
-      kaos: createFakeKaos({ mkdir, writeText }),
+      kaos: createFakeKaos({ mkdir, writeText, iterdir, stat }),
     });
 
     await ctx.rpc.enterPlan({});
@@ -30,7 +38,7 @@ describe('manual plan entry', () => {
 
     expect(ctx.agent.planMode.isActive).toBe(true);
     expect(ctx.agent.planMode.planFilePath).toMatch(/\.md$/);
-    expect(mkdir).toHaveBeenCalledWith('/workspace/plan', { parents: true, existOk: true });
+    expect(mkdir).toHaveBeenCalledWith('/workspace/plans', { parents: true, existOk: true });
     expect(writeText).not.toHaveBeenCalled();
     expect(ctx.allEvents.some((event) => event.event === 'turn.started')).toBe(false);
     expect(ctx.llmCalls).toHaveLength(0);
@@ -46,7 +54,7 @@ describe('manual plan entry', () => {
 
     const livePath = ctx.agent.planMode.planFilePath;
     if (livePath === null) throw new Error('expected active plan path');
-    expect(livePath).toBe('/workspace/plan/stable-plan.md');
+    expect(livePath).toBe('/workspace/plans/stable-plan.md');
 
     const enterRecord = ctx.allEvents.find(
       (event) => event.type === '[wire]' && event.event === 'plan_mode.enter',
@@ -75,6 +83,9 @@ describe('manual plan entry', () => {
     const ctx = testAgent({
       kaos: createPlanKaos({
         writeText: vi.fn(async (_path: string, content: string) => content.length),
+        iterdir: vi.fn(async function* (): AsyncGenerator<string> {
+          // empty plans directory
+        }),
       }),
     });
     ctx.configure({ tools: ['EnterPlanMode'] });
@@ -596,6 +607,142 @@ describe('plan mode injection cadence', () => {
     await ctx.agent.injection.inject();
 
     expect(lastUserText(ctx.agent.context.history)).toContain('Plan mode is active');
+  });
+});
+
+describe('plan GC', () => {
+  const plansDir = '/workspace/plans';
+  const ONE_DAY_S = 24 * 60 * 60;
+
+  it('runs GC when timestamp file is older than 7 days', async () => {
+    const iterdir = vi.fn(async function* (): AsyncGenerator<string> {});
+    const stat = vi.fn().mockImplementation(async (path: string) => {
+      if (typeof path === 'string' && path.endsWith('.last-gc-check')) {
+        return { stMtime: Date.now() / 1000 - 8 * ONE_DAY_S, stMode: 0o040755 } as any;
+      }
+      return { stMtime: Date.now() / 1000, stMode: 0o040755 } as any;
+    });
+    const ctx = testAgent({
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+        iterdir,
+        stat,
+      }),
+    });
+    await ctx.agent.planMode.enter('gc-test-old', false);
+    expect(iterdir).toHaveBeenCalledWith(plansDir);
+  });
+
+  it('skips GC when timestamp file is recent', async () => {
+    const iterdir = vi.fn(async function* (): AsyncGenerator<string> {});
+    const stat = vi.fn().mockImplementation(async (path: string) => {
+      if (typeof path === 'string' && path.endsWith('.last-gc-check')) {
+        return { stMtime: Date.now() / 1000 - ONE_DAY_S, stMode: 0o040755 } as any;
+      }
+      return { stMtime: Date.now() / 1000, stMode: 0o040755 } as any;
+    });
+    const ctx = testAgent({
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        iterdir,
+        stat,
+      }),
+    });
+    await ctx.agent.planMode.enter('gc-test-recent', false);
+    expect(iterdir).not.toHaveBeenCalled();
+  });
+
+  it('runs GC on first encounter when timestamp file does not exist', async () => {
+    const iterdir = vi.fn(async function* (): AsyncGenerator<string> {});
+    const stat = vi.fn().mockImplementation(async (path: string) => {
+      if (typeof path === 'string' && path.endsWith('.last-gc-check')) {
+        const err = new Error('ENOENT');
+        (err as any).code = 'ENOENT';
+        throw err;
+      }
+      return { stMtime: Date.now() / 1000, stMode: 0o040755 } as any;
+    });
+    const ctx = testAgent({
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+        iterdir,
+        stat,
+      }),
+    });
+    await ctx.agent.planMode.enter('gc-test-first', false);
+    expect(iterdir).toHaveBeenCalledWith(plansDir);
+  });
+
+  it('forces GC on corrupted timestamp file and logs a warning', async () => {
+    const iterdir = vi.fn(async function* (): AsyncGenerator<string> {});
+    const stat = vi.fn().mockImplementation(async (path: string) => {
+      if (typeof path === 'string' && path.endsWith('.last-gc-check')) {
+        const err = new Error('EACCES');
+        (err as any).code = 'EACCES';
+        throw err;
+      }
+      return { stMtime: Date.now() / 1000, stMode: 0o040755 } as any;
+    });
+    const log = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const ctx = testAgent({
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+        iterdir,
+        stat,
+      }),
+      log,
+    });
+    await ctx.agent.planMode.enter('gc-test-corrupt', false);
+    expect(iterdir).toHaveBeenCalledWith(plansDir);
+    expect(log.warn).toHaveBeenCalledWith(
+      'PlanMode: GC timestamp file unreadable, forcing GC',
+      expect.objectContaining({ error: expect.objectContaining({ code: 'EACCES' }) }),
+    );
+  });
+});
+
+describe('plan write retry', () => {
+  const plansDir = '/workspace/plans';
+
+  it('retries on collision and succeeds on the second attempt', async () => {
+    let statCallCount = 0;
+    const stat = vi.fn().mockImplementation(async () => {
+      statCallCount++;
+      if (statCallCount === 1) {
+        return { stMtime: Date.now() / 1000, stMode: 0o040755 } as any;
+      }
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+    const writeText = vi.fn().mockResolvedValue(0);
+    const ctx = testAgent({
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        iterdir: vi.fn(async function* (): AsyncGenerator<string> {}),
+        stat,
+        writeText,
+      }),
+    });
+    const result = await (ctx.agent.planMode as any).writePlanWithRetry('plan content');
+    expect(result).toMatchObject({ id: expect.any(String), path: expect.stringContaining(plansDir) });
+    expect(writeText).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws when max retries are exceeded', async () => {
+    const stat = vi.fn().mockResolvedValue({ stMtime: Date.now() / 1000, stMode: 0o040755 } as any);
+    const ctx = testAgent({
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        iterdir: vi.fn(async function* (): AsyncGenerator<string> {}),
+        stat,
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+    });
+    await expect((ctx.agent.planMode as any).writePlanWithRetry('plan content')).rejects.toThrow(
+      'too many collisions',
+    );
   });
 });
 

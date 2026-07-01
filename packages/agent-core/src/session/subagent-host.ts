@@ -20,6 +20,7 @@ import {
   userCancellationReason,
 } from '../utils/abort';
 import { collectGitContext } from './git-context';
+import type { AgentContext } from '#/config/agent-context';
 import type { Session } from './index';
 import {
   SubagentBatch,
@@ -50,6 +51,7 @@ const SUMMARY_CONTINUATION_ATTEMPTS = 1;
 const HOOK_TEXT_PREVIEW_LENGTH = 500;
 const SUBAGENT_MAX_TOKENS_ERROR =
   'Subagent turn failed before completing its final summary: reason=max_tokens';
+const ORCHESTRATION_TOOLS = new Set(['AgentSwarm']);
 const TOOL_CALL_DISABLED_MESSAGE =
   'Tool calls are disabled for side questions. Answer with text only.';
 const SUBAGENT_PROMPT_ORIGIN: PromptOrigin = { kind: 'system_trigger', name: 'subagent' };
@@ -98,6 +100,7 @@ export type SubagentHandle = {
 };
 
 export class SessionSubagentHost {
+  private _runtimeSubagentModel: string | null = null;
   private readonly activeChildren = new Map<
     string,
     {
@@ -109,7 +112,17 @@ export class SessionSubagentHost {
   constructor(
     private readonly session: Session,
     private readonly ownerAgentId: string,
+    readonly agentContext?: AgentContext,
   ) {}
+
+  /**
+   * Runtime override for the subagent model.
+   * `null` means "no override, fall through to config/parent".
+   * A non-empty string forces that model alias for all child agents.
+   */
+  public setRuntimeSubagentModel(model: string | null): void {
+    this._runtimeSubagentModel = model;
+  }
 
   async spawn(options: SpawnSubagentOptions): Promise<SubagentHandle> {
     options.signal.throwIfAborted();
@@ -144,7 +157,6 @@ export class SessionSubagentHost {
     const completion = this.runWithActiveChild(agentId, options, async (runOptions) => {
       this.emitSubagentSpawned(parent, agentId, profileName, runOptions);
       try {
-        child.config.update({ modelAlias: parent.config.modelAlias });
         return await this.runPromptTurn(parent, agentId, child, profileName, runOptions);
       } catch (error) {
         this.emitSubagentFailed(parent, agentId, runOptions, error);
@@ -160,7 +172,6 @@ export class SessionSubagentHost {
     const completion = this.runWithActiveChild(agentId, options, async (runOptions) => {
       try {
         runOptions.signal.throwIfAborted();
-        child.config.update({ modelAlias: parent.config.modelAlias });
         this.emitSubagentStarted(parent, agentId);
         const turnId = child.turn.retry('agent-host');
         if (turnId === null) {
@@ -192,6 +203,8 @@ export class SessionSubagentHost {
       throw new Error(`Agent instance "${agentId}" is already running and cannot run concurrently`);
     }
 
+    child.config.setModelAliasResolver(() => this.resolveChildModel(parent));
+
     const profileName = child.config.profileName ?? 'subagent';
     return { parent, child, profileName };
   }
@@ -221,8 +234,8 @@ export class SessionSubagentHost {
       { parentAgentId: this.ownerAgentId, persistMetadata: false },
     );
 
+    child.config.setModelAliasResolver(() => this.resolveChildModel(parent));
     child.config.update({
-      modelAlias: parent.config.modelAlias,
       thinkingLevel: parent.config.thinkingLevel,
       systemPrompt: parent.config.systemPrompt,
     });
@@ -249,6 +262,7 @@ export class SessionSubagentHost {
   }
 
   markActiveChildDetached(agentId: string): void {
+    this.session.getReadyAgent(agentId)?.config.setModelAliasResolver(undefined);
     const child = this.activeChildren.get(agentId);
     if (child !== undefined) child.runInBackground = true;
   }
@@ -353,8 +367,32 @@ export class SessionSubagentHost {
       usage,
       contextTokens: child.context.tokenCount,
     });
+    parent.context.stateManifest.update((m) => {
+      m.completedTasks.set(childId, {
+        taskId: childId,
+        summary: result.slice(0, 200),
+        status: 'success',
+      });
+    });
     this.triggerSubagentStop(parent, profileName, result);
     return { result, usage };
+  }
+
+  /**
+   * Single source of truth for the model a subagent should use.
+   * 3-tier fallback: subagent-specific → parent's model → global default.
+   * Every lifecycle method MUST call this instead of reading parent.config
+   * directly, so future entry points get the correct model automatically.
+   */
+  private resolveChildModel(parent: Agent): string {
+    const config = this.session.options.config;
+    return (
+      this._runtimeSubagentModel ??   // Tier 0: runtime override
+      config?.subagentModel ??        // Tier 1: config file
+      parent.config.modelAlias ??     // Tier 2: parent's model
+      config?.defaultModel ??         // Tier 3: global default
+      ''
+    );
   }
 
   private async configureChild(
@@ -363,10 +401,12 @@ export class SessionSubagentHost {
     profile: ResolvedAgentProfile,
   ): Promise<void> {
     // A subagent always inherits the parent agent's model.
+    child.config.setModelAliasResolver(() => this.resolveChildModel(parent));
     child.config.update({
       cwd: parent.config.cwd,
-      modelAlias: parent.config.modelAlias,
       thinkingLevel: parent.config.thinkingLevel,
+      temperature: profile.temperature,
+      seed: profile.seed,
     });
 
     const context = await prepareSystemPromptContext(
@@ -376,6 +416,10 @@ export class SessionSubagentHost {
     );
     child.useProfile(profile, context);
     child.tools.inheritUserTools(parent.tools);
+
+    // Sub-agents must not have access to orchestration tools (e.g. AgentSwarm)
+    // to prevent infinite nesting of swarm calls.
+    child.tools.removeFromActiveTools([...ORCHESTRATION_TOOLS]);
   }
 
   private async triggerSubagentStart(

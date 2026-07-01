@@ -19,6 +19,7 @@ import type {
   PromptPart,
   Session,
 } from '@moonshot-ai/kimi-code-sdk';
+import { createAgentContext } from '@moonshot-ai/kimi-code-sdk';
 import type { MigrationPlan } from '@moonshot-ai/migration-legacy';
 import { resolve } from 'pathe';
 
@@ -153,6 +154,7 @@ export interface KimiTUIStartupInput {
   readonly tuiConfig: TuiConfig;
   readonly version: string;
   readonly workDir: string;
+  readonly config?: { subagentModel?: string; defaultModel?: string };
   readonly startupNotice?: string;
   readonly migrationPlan?: MigrationPlan | null;
   /** When true, run only the migration screen, then exit (the `kimi migrate` command). */
@@ -191,6 +193,7 @@ function createInitialAppState(input: KimiTUIStartupInput): AppState {
     planMode: input.cliOptions.plan,
     swarmMode: false,
     thinking: false,
+    subagentModel: input.config?.subagentModel ?? input.config?.defaultModel,
     contextUsage: 0,
     contextTokens: 0,
     maxContextTokens: 0,
@@ -295,6 +298,7 @@ export class KimiTUI {
         yolo: startupInput.cliOptions.yolo,
         auto: startupInput.cliOptions.auto,
         plan: startupInput.cliOptions.plan,
+        orchestrator: startupInput.cliOptions.orchestrator,
         model: startupInput.cliOptions.model,
         startupNotice: startupInput.startupNotice,
       },
@@ -627,6 +631,7 @@ export class KimiTUI {
       model: startup.model,
       permission: startup.auto ? 'auto' : startup.yolo ? 'yolo' : undefined,
       planMode: startup.plan ? true : undefined,
+      agentContext: startup.orchestrator ? createAgentContext(undefined, true) : undefined,
     };
     if (this.state.appState.additionalDirs.length > 0) {
       createSessionOptions.additionalDirs = [...this.state.appState.additionalDirs];
@@ -1177,6 +1182,7 @@ export class KimiTUI {
         this.session === undefined ? undefined : this.state.appState.thinking ? 'on' : 'off',
       permission: this.state.appState.permissionMode,
       planMode: this.state.appState.planMode ? true : undefined,
+      agentContext: this.options.startup.orchestrator ? createAgentContext(undefined, true) : undefined,
     };
     if (this.state.appState.additionalDirs.length > 0) {
       options.additionalDirs = [...this.state.appState.additionalDirs];

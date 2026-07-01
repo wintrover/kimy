@@ -40,6 +40,7 @@ import { ToolAccesses } from '../../../loop/tool-access';
 import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import { isWithinDirectory, resolvePathAccessPath } from '../../policies/path-access';
 import type { PathClass } from '../../policies/path-access';
+import { createAjvValidateArgs } from '../../args-validator';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesGlobRuleSubject } from '../../support/rule-match';
 import type { WorkspaceConfig } from '../../support/workspace';
@@ -107,6 +108,8 @@ export class GlobTool implements BuiltinTool<GlobInput> {
   readonly name = 'Glob' as const;
   readonly description: string;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(GlobInputSchema);
+  private readonly _validateArgs = createAjvValidateArgs(this.parameters);
+  validateArgs(args: unknown) { return this._validateArgs(args); }
   constructor(
     private readonly kaos: Kaos,
     private readonly workspace: WorkspaceConfig,

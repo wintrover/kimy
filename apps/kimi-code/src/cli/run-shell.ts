@@ -94,16 +94,22 @@ export async function runShell(
     return;
   }
   const config = await harness.getConfig();
+  // Resolve orchestrator: CLI flag takes precedence over config.toml agent_role.
+  const resolvedOpts: CLIOptions = {
+    ...opts,
+    orchestrator: opts.orchestrator || config.agentRole === 'orchestrator',
+  };
   for (const warning of (await harness.getConfigDiagnostics()).warnings) {
     configWarning = combineStartupNotice(configWarning, warning);
   }
   const configMs = Date.now() - configStartedAt;
   const tui = new KimiTUI(harness, {
-    cliOptions: opts,
-    additionalDirs: opts.addDirs?.length ? opts.addDirs : undefined,
+    cliOptions: resolvedOpts,
+    additionalDirs: resolvedOpts.addDirs?.length ? resolvedOpts.addDirs : undefined,
     tuiConfig,
     version,
     workDir,
+    config,
     startupNotice: configWarning,
     migrationPlan,
     migrateOnly: runOptions.migrateOnly,

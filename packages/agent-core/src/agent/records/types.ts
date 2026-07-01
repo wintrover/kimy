@@ -80,6 +80,10 @@ export interface AgentRecordEvents {
   'context.clear': {};
   'context.apply_compaction': CompactionResult;
   'context.undo': { count: number };
+  'context.restore': {
+    historyLength: number;
+    tokenCount: number;
+  };
 
   'tools.update_store': ToolStoreUpdate;
 

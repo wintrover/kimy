@@ -26,6 +26,7 @@ interface ModelChoice {
   readonly provider: string;
   /** Combined text the fuzzy filter matches against (name + provider). */
   readonly label: string;
+  readonly isDuplicate: boolean;
 }
 
 export interface ModelSelection {
@@ -72,10 +73,38 @@ export interface ModelSelectorOptions {
 }
 
 function createModelChoices(models: Record<string, ModelAlias>): readonly ModelChoice[] {
-  return Object.entries(models).map(([alias, cfg]) => {
+  const entries = Object.entries(models);
+
+  // 1) Build raw choices with original names.
+  const raw = entries.map(([alias, cfg]) => {
     const name = modelDisplayName(alias, cfg);
     const provider = providerDisplayName(cfg.provider);
-    return { alias, model: cfg, name, provider, label: `${name} (${provider})` };
+    return { alias, model: cfg, name, provider };
+  });
+
+  // 2) Detect duplicate display names across providers.
+  const nameProviders = new Map<string, Set<string>>();
+  for (const item of raw) {
+    let set = nameProviders.get(item.name);
+    if (set === undefined) {
+      set = new Set();
+      nameProviders.set(item.name, set);
+    }
+    set.add(item.provider);
+  }
+
+  // 3) Stamp isDuplicate — name stays pristine, only render() uses the flag.
+  return raw.map((item) => {
+    const providers = nameProviders.get(item.name);
+    const isDuplicate = providers !== undefined && providers.size > 1;
+    return {
+      alias: item.alias,
+      model: item.model,
+      name: item.name,
+      provider: item.provider,
+      label: `${item.name} (${item.provider})`,
+      isDuplicate,
+    };
   });
 }
 
@@ -216,7 +245,12 @@ export class ModelSelectorComponent extends Container implements Focusable {
       let nameWidth = 0;
       for (let i = view.page.start; i < view.page.end; i++) {
         const choice = view.items[i];
-        if (choice !== undefined) nameWidth = Math.max(nameWidth, visibleWidth(choice.name));
+        if (choice !== undefined) {
+          const displayName = choice.isDuplicate
+            ? `${choice.name} [${choice.provider}]`
+            : choice.name;
+          nameWidth = Math.max(nameWidth, visibleWidth(displayName));
+        }
       }
       nameWidth = Math.min(nameWidth, nameCap);
 
@@ -226,7 +260,10 @@ export class ModelSelectorComponent extends Container implements Focusable {
         const isSelected = i === view.selectedIndex;
         const isCurrent = choice.alias === this.opts.currentValue;
         const pointer = isSelected ? SELECT_POINTER : ' ';
-        const truncatedName = truncateToWidth(choice.name, nameWidth, '…');
+        const displayName = choice.isDuplicate
+          ? `${choice.name} [${choice.provider}]`
+          : choice.name;
+        const truncatedName = truncateToWidth(displayName, nameWidth, '…');
         const namePad = ' '.repeat(Math.max(0, nameWidth - visibleWidth(truncatedName)));
         let line = currentTheme.fg(isSelected ? 'primary' : 'textDim', `  ${pointer} `);
         line += (isSelected ? currentTheme.boldFg('primary', truncatedName) : currentTheme.fg('text', truncatedName)) + namePad;

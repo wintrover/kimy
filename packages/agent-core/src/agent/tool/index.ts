@@ -13,6 +13,7 @@ import type { MCPClient } from '../../mcp/types';
 import { DEFAULT_AGENT_PROFILES } from '../../profile';
 import { extendWorkspaceWithSkillRoots } from '../../skill';
 import * as b from '../../tools/builtin';
+import { createAjvValidateArgs } from '../../tools/args-validator';
 import type { ToolStore, ToolStoreData, ToolStoreKey } from '../../tools/store';
 import type {
   BuiltinTool,
@@ -23,6 +24,13 @@ import type {
 } from './types';
 
 export * from './types';
+
+/** Tools the main agent must keep visible when swarm mode is active (orchestration / collaboration only). */
+const SWARM_COLLABORATION_TOOLS = new Set([
+  'AgentSwarm', 'Agent', 'Skill', 'TodoList', 'CreateGoal', 'UpdateGoal',
+  'EnterPlanMode', 'ExitPlanMode', 'AskUserQuestion',
+  'CronCreate', 'CronDelete', 'CronList',
+]);
 
 interface McpToolEntry {
   readonly tool: ExecutableTool;
@@ -93,6 +101,7 @@ export class ToolManager {
       name,
       description,
       parameters,
+      validateArgs: createAjvValidateArgs(parameters),
       resolveExecution: (args) => {
         return {
           approvalRule: name,
@@ -169,6 +178,7 @@ export class ToolManager {
         name: qualified,
         description: tool.description,
         parameters: tool.parameters,
+        validateArgs: createAjvValidateArgs(tool.parameters, { strict: 'log' }),
         resolveExecution: (args) => {
           return {
             approvalRule: qualified,
@@ -317,6 +327,12 @@ export class ToolManager {
     this.loopToolsOverride = source.loopTools;
   }
 
+  removeFromActiveTools(names: readonly string[]): void {
+    for (const name of names) {
+      this.enabledTools.delete(name);
+    }
+  }
+
   private isMcpToolEnabled(name: string): boolean {
     return this.mcpAccessPatterns.some((pattern) => picomatch.isMatch(name, pattern));
   }
@@ -446,12 +462,17 @@ export class ToolManager {
     const mcpNames = [...this.mcpTools.keys()].filter((name) => this.isMcpToolEnabled(name));
     // Mutation goal tools are only offered to the model while a goal exists.
     const hideGoalMutationTools = this.agent.goal.getGoal().goal === null;
-    return uniq([...this.enabledTools, ...mcpNames])
+    let names = uniq([...this.enabledTools, ...mcpNames])
       .toSorted((a, b) => a.localeCompare(b))
       .filter(
         (name) =>
           !(hideGoalMutationTools && (name === 'SetGoalBudget' || name === 'UpdateGoal')),
-      )
+      );
+    // Swarm mode: hide leaf tools, keep only orchestration/collaboration tools
+    if (this.agent.swarmMode?.isActive) {
+      names = names.filter((name) => SWARM_COLLABORATION_TOOLS.has(name));
+    }
+    return names
       .map(
         (name) =>
           this.userTools.get(name) ??

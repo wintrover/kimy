@@ -1,4 +1,8 @@
-import type { PrepareToolExecutionResult, ResolvedToolExecutionHookContext } from '../../loop';
+import type {
+  PrepareToolExecutionResult,
+  ResolvedToolExecutionHookContext,
+  VirtualTurnTrigger,
+} from '../../loop';
 import type { ToolInputDisplay } from '../../tools/display';
 
 export type PermissionRuleDecision = 'allow' | 'deny' | 'ask';
@@ -63,6 +67,8 @@ export interface PermissionData {
 
 export type PermissionDecision = 'approve' | 'deny' | 'ask';
 
+export type PermissionPolicyCategory = 'deny' | 'approve' | 'ask_resource' | 'ask_lifecycle';
+
 export type PermissionReasonValue = string | number | boolean | null;
 
 export type PermissionDecisionReason = Readonly<Record<string, PermissionReasonValue>>;
@@ -71,7 +77,9 @@ export type PermissionPolicyResolution =
   | PermissionPolicyResult
   | ({ readonly kind: 'result' } & PrepareToolExecutionResult);
 
-export interface PermissionPolicyContext extends ResolvedToolExecutionHookContext {}
+export interface PermissionPolicyContext extends ResolvedToolExecutionHookContext {
+  virtualTurnTrigger?: VirtualTurnTrigger;
+}
 
 export type PermissionPolicyResult =
   | {
@@ -95,6 +103,7 @@ export type PermissionPolicyResult =
 
 export interface PermissionPolicy {
   readonly name: string;
+  readonly category: PermissionPolicyCategory;
   evaluate(
     context: PermissionPolicyContext,
   ): PermissionPolicyResult | undefined | Promise<PermissionPolicyResult | undefined>;

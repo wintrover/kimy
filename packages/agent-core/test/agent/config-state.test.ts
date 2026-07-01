@@ -15,6 +15,7 @@ describe('ConfigState model capabilities', () => {
               apiKey: 'test-key',
             },
           },
+          agentRole: 'default',
           models: {
             'kimi-code/kimi-for-coding': {
               provider: 'kimi',
@@ -52,6 +53,7 @@ describe('ConfigState model capabilities', () => {
               apiKey: 'test-key',
             },
           },
+          agentRole: 'default',
           models: {
             'kimi-code': {
               provider: 'kimi',
@@ -98,6 +100,7 @@ describe('ConfigState model capabilities', () => {
               baseUrl: 'https://api.deepseek.example/v1',
             },
           },
+          agentRole: 'default',
           models: {
             'deepseek/deepseek-v4-flash': {
               provider: 'deepseek',
@@ -135,6 +138,7 @@ describe('ConfigState model capabilities', () => {
               apiKey: 'test-key',
             },
           },
+          agentRole: 'default',
           models: {
             'kimi-code': {
               provider: 'kimi',
@@ -165,6 +169,7 @@ describe('ConfigState thinking clamp for always-thinking models', () => {
       providerManager: new ProviderManager({
         config: {
           providers: { kimi: { type: 'kimi', apiKey: 'test-key' } },
+          agentRole: 'default',
           models: {
             'kimi-code/deep': {
               provider: 'kimi',
@@ -225,6 +230,7 @@ describe('ConfigState.provider applies global KIMI_MODEL_* request config', () =
       providerManager: new ProviderManager({
         config: {
           providers: { kimi: { type: 'kimi', apiKey: 'test-key' } },
+          agentRole: 'default',
           models: {
             'kimi-code': { provider: 'kimi', model: 'kimi-code', maxContextSize: 128_000 },
           },

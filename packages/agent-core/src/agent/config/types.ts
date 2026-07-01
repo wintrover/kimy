@@ -8,6 +8,8 @@ export interface AgentConfigData {
   profileName?: string;
   thinkingLevel: string;
   systemPrompt: string;
+  temperature?: number;
+  seed?: number;
 }
 
 export type AgentConfigUpdateData = Partial<{
@@ -16,4 +18,6 @@ export type AgentConfigUpdateData = Partial<{
   profileName: string;
   thinkingLevel: string;
   systemPrompt: string;
+  temperature: number;
+  seed: number;
 }>;

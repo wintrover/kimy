@@ -465,6 +465,7 @@ export function configToTomlData(config: KimiConfig): Record<string, unknown> {
   const scalarFields: (keyof KimiConfig)[] = [
     'defaultProvider',
     'defaultModel',
+    'subagentModel',
     'planMode',
     'yolo',
     'defaultThinking',
@@ -473,6 +474,7 @@ export function configToTomlData(config: KimiConfig): Record<string, unknown> {
     'mergeAllAvailableSkills',
     'extraSkillDirs',
     'telemetry',
+    'agentRole',
   ];
   for (const key of scalarFields) {
     setDefined(out, camelToSnake(key), config[key]);

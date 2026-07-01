@@ -21,9 +21,8 @@ import { AgentSwarmExclusiveDenyPermissionPolicy } from '../../src/agent/permiss
 import { AutoModeApprovePermissionPolicy } from '../../src/agent/permission/policies/auto-mode-approve';
 import { AutoModeAskUserQuestionDenyPermissionPolicy } from '../../src/agent/permission/policies/auto-mode-ask-user-question-deny';
 import { FallbackAskPermissionPolicy } from '../../src/agent/permission/policies/fallback-ask';
-import { createPermissionDecisionPolicies } from '../../src/agent/permission/policies';
+import { createPermissionPipeline } from '../../src/agent/permission/policies';
 import { SwarmModeAgentSwarmApprovePermissionPolicy } from '../../src/agent/permission/policies/swarm-mode-agent-swarm-approve';
-import { YoloModeApprovePermissionPolicy } from '../../src/agent/permission/policies/yolo-mode-approve';
 import { ToolAccesses } from '../../src/loop';
 import type { ToolInputDisplay } from '../../src/tools/display';
 import {
@@ -338,7 +337,7 @@ describe('Permission auto mode', () => {
 
   it.each([
     ['auto', 'auto-mode-approve'],
-    ['yolo', 'yolo-mode-approve'],
+    ['yolo', 'yolo-auto-approve'],
   ] as const)('tracks %s mode bypass through %s', async (mode, policyName) => {
     const { manager, requestApproval, telemetryTrack } = makePermissionManager(async () => ({
       decision: 'approved',
@@ -398,7 +397,7 @@ describe('Permission auto mode', () => {
       expect(telemetryTrack).toHaveBeenCalledWith(
         'permission_policy_decision',
         expect.objectContaining({
-          policy_name: mode === 'auto' ? 'auto-mode-approve' : 'yolo-mode-approve',
+          policy_name: mode === 'auto' ? 'auto-mode-approve' : 'default-tool-approve',
           tool_name: 'Read',
           permission_mode: mode,
           decision: 'approve',
@@ -463,7 +462,7 @@ describe('Permission auto mode', () => {
     expect(telemetryTrack).toHaveBeenCalledWith(
       'permission_policy_decision',
       expect.objectContaining({
-        policy_name: 'yolo-mode-approve',
+        policy_name: 'yolo-auto-approve',
         tool_name: toolName,
         permission_mode: 'yolo',
         decision: 'approve',
@@ -694,16 +693,82 @@ describe('Permission auto mode', () => {
     expect(manager.sessionApprovalRulePatterns).toEqual([]);
     expect(manager.data().rules).toEqual([]);
   });
+
+  it('skips git-control-path-access-ask policy in yolo mode', async () => {
+    const { manager, requestApproval } = makePermissionManager(async () => ({
+      decision: 'approved',
+    }));
+    manager.setMode('yolo');
+    await expect(
+      manager.beforeToolCall(
+        hookContext({
+          id: 'call_git',
+          toolName: 'Read',
+          args: { path: '/workspace/.git/config' },
+        }),
+      ),
+    ).resolves.toBeUndefined();
+    expect(requestApproval).not.toHaveBeenCalled();
+  });
+
+  it('still enforces deny rules in yolo mode for .git paths', async () => {
+    const { manager, requestApproval } = makePermissionManager(async () => ({
+      decision: 'approved',
+    }));
+    manager.setMode('yolo');
+    manager.rules.push({
+      decision: 'deny',
+      scope: 'user',
+      pattern: 'Read',
+      reason: 'blocked by test',
+    });
+    await expect(
+      manager.beforeToolCall(
+        hookContext({
+          id: 'call_git',
+          toolName: 'Read',
+          args: { path: '/workspace/.git/config' },
+        }),
+      ),
+    ).resolves.toMatchObject({
+      block: true,
+      reason: 'Tool "Read" was denied by permission rule. Reason: blocked by test',
+    });
+    expect(requestApproval).not.toHaveBeenCalled();
+  });
+
+  it('asks for .git control path access in manual mode', async () => {
+    const { manager, requestApproval } = makePermissionManager(async () => ({
+      decision: 'approved',
+    }));
+    await expect(
+      manager.beforeToolCall(
+        hookContext({
+          id: 'call_git',
+          toolName: 'Read',
+          args: { path: '/workspace/.git/config' },
+        }),
+      ),
+    ).resolves.toBeUndefined();
+    expect(requestApproval).toHaveBeenCalledTimes(1);
+    expect(requestApproval.mock.calls[0]![0]).toMatchObject({
+      toolName: 'Read',
+      toolCallId: 'call_git',
+    });
+  });
 });
 
 describe('Permission policy chain', () => {
-  it('keeps built-in policies in document order', () => {
-    expect(createPermissionDecisionPolicies({} as Agent).map((policy) => policy.name)).toEqual([
+  it('keeps built-in policies in document order across pipeline layers', () => {
+    const pipeline = createPermissionPipeline({} as Agent);
+    expect(pipeline.guards.policies.map((p) => p.name)).toEqual([
       'pre-tool-call-hook',
       'agent-swarm-exclusive-deny',
       'auto-mode-ask-user-question-deny',
       'plan-mode-guard-deny',
       'user-configured-deny',
+    ]);
+    expect(pipeline.overrides.policies.map((p) => p.name)).toEqual([
       'auto-mode-approve',
       'session-approval-history',
       'user-configured-ask',
@@ -711,9 +776,10 @@ describe('Permission policy chain', () => {
       'exit-plan-mode-review-ask',
       'goal-start-review-ask',
       'plan-mode-tool-approve',
+    ]);
+    expect(pipeline.fallbacks.policies.map((p) => p.name)).toEqual([
       'sensitive-file-access-ask',
       'git-control-path-access-ask',
-      'yolo-mode-approve',
       'swarm-mode-agent-swarm-approve',
       'default-tool-approve',
       'git-cwd-write-approve',
@@ -801,15 +867,6 @@ describe('Simple permission policy direct behavior', () => {
         }),
       ),
     ).toBeUndefined();
-  });
-
-  it('approves only in yolo mode for YoloModeApprovePermissionPolicy', () => {
-    const agent = { permission: { mode: 'manual' } } as unknown as Agent;
-    const policy = new YoloModeApprovePermissionPolicy(agent);
-
-    expect(policy.evaluate()).toBeUndefined();
-    Object.assign(agent.permission, { mode: 'yolo' });
-    expect(policy.evaluate()).toEqual({ kind: 'approve' });
   });
 
   it('approves only AgentSwarm when swarm mode is active', () => {
@@ -920,6 +977,92 @@ describe('Simple permission policy direct behavior', () => {
         }),
       ),
     ).toBeUndefined();
+  });
+
+  it('sets virtualTurnTrigger when AgentSwarm is mixed with other tools', () => {
+    const policy = new AgentSwarmExclusiveDenyPermissionPolicy();
+    const agentSwarmCall = toolCall('call_agent_swarm', 'AgentSwarm', {
+      description: 'Review files',
+      prompt_template: 'Review {{item}}',
+      items: ['src/a.ts', 'src/b.ts'],
+    });
+    const readCall = toolCall('call_read', 'Read', { path: 'src/a.ts' });
+    const context = hookContext({
+      id: 'call_agent_swarm',
+      toolName: 'AgentSwarm',
+      toolCalls: [agentSwarmCall, readCall],
+    });
+
+    const result = policy.evaluate(context);
+
+    expect(result).toBeDefined();
+    expect(result!.kind).toBe('deny');
+    expect(context.virtualTurnTrigger).toEqual({
+      reason: 'agent-swarm-mixed-batch',
+      message: 'AgentSwarm must be the sole tool call. Regenerate with AgentSwarm alone.',
+    });
+  });
+
+  it('sets virtualTurnTrigger when multiple AgentSwarm calls are present', () => {
+    const policy = new AgentSwarmExclusiveDenyPermissionPolicy();
+    const first = toolCall('call_agent_swarm_1', 'AgentSwarm', {
+      description: 'Review files',
+      prompt_template: 'Review {{item}}',
+      items: ['src/a.ts', 'src/b.ts'],
+    });
+    const second = toolCall('call_agent_swarm_2', 'AgentSwarm', {
+      description: 'Review tests',
+      prompt_template: 'Review {{item}}',
+      items: ['test/a.ts', 'test/b.ts'],
+    });
+    const context = hookContext({
+      id: 'call_agent_swarm_1',
+      toolName: 'AgentSwarm',
+      toolCalls: [first, second],
+    });
+
+    const result = policy.evaluate(context);
+
+    expect(result).toBeDefined();
+    expect(result!.kind).toBe('deny');
+    expect(context.virtualTurnTrigger).toEqual({
+      reason: 'agent-swarm-mixed-batch',
+      message: 'AgentSwarm must be the sole tool call. Regenerate with AgentSwarm alone.',
+    });
+  });
+
+  it('does not set virtualTurnTrigger for a single AgentSwarm call', () => {
+    const policy = new AgentSwarmExclusiveDenyPermissionPolicy();
+    const agentSwarmCall = toolCall('call_agent_swarm', 'AgentSwarm', {
+      description: 'Review files',
+      prompt_template: 'Review {{item}}',
+      items: ['src/a.ts', 'src/b.ts'],
+    });
+    const context = hookContext({
+      id: 'call_agent_swarm',
+      toolName: 'AgentSwarm',
+      toolCalls: [agentSwarmCall],
+    });
+
+    const result = policy.evaluate(context);
+
+    expect(result).toBeUndefined();
+    expect(context.virtualTurnTrigger).toBeUndefined();
+  });
+
+  it('does not set virtualTurnTrigger when no AgentSwarm is present', () => {
+    const policy = new AgentSwarmExclusiveDenyPermissionPolicy();
+    const readCall = toolCall('call_read', 'Read', { path: 'src/a.ts' });
+    const context = hookContext({
+      id: 'call_read',
+      toolName: 'Read',
+      toolCalls: [readCall],
+    });
+
+    const result = policy.evaluate(context);
+
+    expect(result).toBeUndefined();
+    expect(context.virtualTurnTrigger).toBeUndefined();
   });
 
   it('always asks in FallbackAskPermissionPolicy', () => {
@@ -2829,16 +2972,22 @@ describe('Default git CWD Write/Edit permission', () => {
     ).resolves.toBeUndefined();
 
     expect(requestApproval).toHaveBeenCalledTimes(2);
-    expect(stat.mock.calls.map(([path]) => path)).toEqual([
-      '/workspace/.git',
-      '/.git',
-      '/workspace/.git',
-      '/.git',
-      '/workspace/.git',
-      '/.git',
-      '/workspace/.git',
-      '/.git',
-    ]);
+    // Parallel evaluation within each layer may reorder stat calls within a
+    // pair. Check total count and that each tool call triggered both paths.
+    expect(stat).toHaveBeenCalledTimes(8);
+    const statPaths = stat.mock.calls.map(([path]) => path);
+    expect(statPaths).toEqual(
+      expect.arrayContaining([
+        '/workspace/.git',
+        '/workspace/.git',
+        '/workspace/.git',
+        '/workspace/.git',
+        '/.git',
+        '/.git',
+        '/.git',
+        '/.git',
+      ]),
+    );
   });
 
   it('still requests approval when a relative path escapes cwd via ..', async () => {

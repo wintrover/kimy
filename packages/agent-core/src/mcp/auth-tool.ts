@@ -155,6 +155,7 @@ export function createMcpAuthTool(options: CreateMcpAuthToolOptions): Executable
     name,
     description,
     parameters,
+    validateArgs: (args: unknown) => ({ success: true as const, data: args }),
     resolveExecution: () => {
       return {
         description: `Authenticating ${serverName}`,

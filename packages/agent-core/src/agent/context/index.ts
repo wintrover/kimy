@@ -12,6 +12,7 @@ import {
   type ContextMessage,
   type PromptOrigin,
 } from './types';
+import { StateManifest } from './state-manifest';
 
 export * from './types';
 
@@ -22,6 +23,12 @@ const TOOL_EMPTY_ERROR_STATUS =
 const TOOL_OUTPUT_EMPTY_TEXT = 'Tool output is empty.';
 const TOOL_INTERRUPTED_ON_RESUME_OUTPUT =
   'Tool execution was interrupted before its result was recorded. Do not assume the tool completed successfully.';
+
+export interface ContextSnapshot {
+  readonly historyLength: number;
+  readonly tokenCount: number;
+  readonly coveredMessageCount: number;
+}
 
 // Invariant: _history must not contain an unresolved tool call exchange except
 // at the tail. When the tail is unresolved, pendingToolResultIds is exactly the
@@ -35,6 +42,7 @@ export class ContextMemory {
   private pendingToolResultIds = new Set<string>();
   private deferredMessages: ContextMessage[] = [];
   private _lastAssistantAt: number | null = null;
+  readonly stateManifest = new StateManifest();
 
   constructor(protected readonly agent: Agent) {}
 
@@ -97,6 +105,7 @@ export class ContextMemory {
     this.pendingToolResultIds.clear();
     this.deferredMessages = [];
     this._lastAssistantAt = null;
+    this.stateManifest.clear();
     this.agent.microCompaction.reset();
     this.agent.injection.onContextClear();
     this.agent.emitStatusUpdated();
@@ -218,12 +227,65 @@ export class ContextMemory {
   }
 
   get messages(): Message[] {
-    return this.project(this.history);
+    const projected = this.project(this.history);
+    const manifestText = this.stateManifest.toPromptString();
+    if (manifestText.length === 0) return projected;
+    return [
+      ...projected,
+      {
+        role: 'user' as const,
+        content: [{ type: 'text' as const, text: `<state-manifest>\n${manifestText}\n</state-manifest>` }],
+        toolCalls: [],
+      },
+    ];
   }
 
   useProjectedHistoryFrom(source: ContextMemory): void {
     this.clear();
     this.pushHistory(...trimTrailingOpenToolExchange(source.project(source.history)));
+  }
+
+  replaceHistory(messages: readonly ContextMessage[]): void {
+    this._history = [...messages];
+    this._tokenCount = estimateTokensForMessages(this._history);
+    this.tokenCountCoveredMessageCount = this._history.length;
+    this.openSteps.clear();
+    this.pendingToolResultIds.clear();
+    this.deferredMessages = [];
+    this.agent.microCompaction.reset();
+    this.agent.emitStatusUpdated();
+  }
+
+  snapshot(): ContextSnapshot {
+    return {
+      historyLength: this._history.length,
+      tokenCount: this._tokenCount,
+      coveredMessageCount: this.tokenCountCoveredMessageCount,
+    };
+  }
+
+  restore(snapshot: ContextSnapshot): void {
+    // 1. Truncate history
+    if (snapshot.historyLength < this._history.length) {
+      const removed = this._history.splice(snapshot.historyLength);
+      for (let i = removed.length - 1; i >= 0; i--) {
+        this.agent.injection.onContextMessageRemoved(snapshot.historyLength + i);
+      }
+    }
+    // 2. Restore token counts (atomic — no estimate drift)
+    this._tokenCount = snapshot.tokenCount;
+    this.tokenCountCoveredMessageCount = snapshot.coveredMessageCount;
+    // 3. Clean up
+    this.openSteps.clear();
+    this.pendingToolResultIds.clear();
+    this.deferredMessages.length = 0;
+    this.agent.microCompaction.reset();
+    // 4. Log record
+    this.agent.records.logRecord({
+      type: 'context.restore',
+      historyLength: snapshot.historyLength,
+      tokenCount: snapshot.tokenCount,
+    });
   }
 
   finishResume(): void {
@@ -440,3 +502,5 @@ function formatUndoUnavailableMessage(
     return `${String(count)} ${count === 1 ? 'prompt' : 'prompts'}`;
   }
 }
+
+export * from './state-manifest';

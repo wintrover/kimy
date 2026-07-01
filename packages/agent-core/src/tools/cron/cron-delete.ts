@@ -41,6 +41,7 @@ import { z } from 'zod';
 import type { BuiltinTool } from '../../agent/tool';
 import type { CronManager } from '../../agent/cron';
 import type { ToolExecution } from '../../loop/types';
+import { createAjvValidateArgs } from '../args-validator';
 import { toInputJsonSchema } from '../support/input-schema';
 import CRON_DELETE_DESCRIPTION from './cron-delete.md?raw';
 
@@ -72,6 +73,8 @@ export class CronDeleteTool implements BuiltinTool<CronDeleteInput> {
   readonly parameters: Record<string, unknown> = toInputJsonSchema(
     CronDeleteInputSchema,
   );
+  private readonly _validateArgs = createAjvValidateArgs(this.parameters);
+  validateArgs(args: unknown) { return this._validateArgs(args); }
 
   constructor(private readonly manager: CronManager) {}
 
