@@ -53,6 +53,11 @@ export class FullCompaction {
     promise: Promise<void>;
     blockedByTurn: boolean;
   } | null = null;
+  private pendingCompaction: {
+    promise: Promise<void>;
+    controller: AbortController;
+    blockedByTurn: number;
+  } | null = null;
   protected readonly strategy: CompactionStrategy;
 
   constructor(
@@ -125,6 +130,31 @@ export class FullCompaction {
     this.agent.emitEvent({ type: 'compaction.cancelled' });
   }
 
+  async waitForPendingCompaction(): Promise<void> {
+    if (this.pendingCompaction) {
+      await this.pendingCompaction.promise;
+    }
+  }
+
+  ensureCompactionQueued(turnIndex: number): void {
+    if (this.pendingCompaction || this.compacting) return;
+    const controller = new AbortController();
+    const promise = this.runPendingCompaction(controller, turnIndex).catch(() => {});
+    this.pendingCompaction = { promise, controller, blockedByTurn: turnIndex };
+  }
+
+  private async runPendingCompaction(controller: AbortController, turnIndex: number): Promise<void> {
+    try {
+      this.begin({ source: 'auto', instruction: undefined });
+      if (this.compacting) {
+        await this.compacting.promise;
+      }
+    } catch {
+      // synchronous error from begin() (e.g. COMPACTION_UNABLE) — nothing to clean up
+    }
+    this.pendingCompaction = null;
+  }
+
   markCompleted() {
     this.agent.records.logRecord({
       type: 'full_compaction.complete',
@@ -148,6 +178,13 @@ export class FullCompaction {
   }
 
   async beforeStep(signal: AbortSignal): Promise<void> {
+    const compactionRatio = this.agent.kimiConfig?.loopControl?.preemptiveCompactionRatio ?? 0.7;
+    const maxTokens = this.agent.config.modelCapabilities.max_context_tokens ?? Infinity;
+    const curTokens = this.agent.context.tokenCount;
+    if (maxTokens > 0 && maxTokens !== Infinity && curTokens / maxTokens > compactionRatio && !this.compacting && !this.pendingCompaction && this.strategy.shouldCompact(curTokens)) {
+      this.ensureCompactionQueued(this.agent.turn.activeStep);
+    }
+    await this.waitForPendingCompaction();
     this.checkAutoCompaction();
     if (this.strategy.shouldBlock(this.tokenCountWithPending)) {
       await this.block(signal);
@@ -235,6 +272,19 @@ export class FullCompaction {
       const blockedByTurn = this.compacting?.blockedByTurn === true;
       this.cancel();
       this.agent.log.error('compaction failed', { error });
+      const maxTokens = this.agent.config.modelCapabilities.max_context_tokens ?? Infinity;
+      if (maxTokens !== Infinity) {
+        const providerId = this.agent.config.provider.name;
+        const original = this.agent.context.history;
+        const pruned = this.strategy.hardPrune(
+          original,
+          maxTokens,
+          providerId,
+        );
+        if (pruned.length !== original.length || pruned.some((m, i) => m !== original[i])) {
+          this.agent.context.replaceHistory(pruned);
+        }
+      }
       if (blockedByTurn) {
         throw error;
       }

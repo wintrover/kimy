@@ -12,6 +12,15 @@ export class AgentSwarmExclusiveDenyPermissionPolicy implements PermissionPolicy
     if (agentSwarmCount === 0) return;
     if (agentSwarmCount === 1 && toolCalls.length === 1) return;
 
+    const mixedBatchDetected = agentSwarmCount >= 1 && toolCalls.length > 1;
+    if (mixedBatchDetected) {
+      context.virtualTurnTrigger = {
+        reason: 'agent-swarm-mixed-batch',
+        message:
+          'AgentSwarm must be the sole tool call. Regenerate with AgentSwarm alone.',
+      };
+    }
+
     return {
       kind: 'deny',
       message:

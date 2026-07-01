@@ -48,6 +48,15 @@ export class EchoTool implements ExecutableTool<EchoInput> {
   readonly name = 'echo';
   readonly description = 'Return the input text unchanged.';
   readonly parameters = TEXT_PARAMETERS;
+  validateArgs(args: unknown) {
+    if (typeof args === 'object' && args !== null && typeof (args as Record<string, unknown>)['text'] === 'string') {
+      return { success: true as const, data: args };
+    }
+    return {
+      success: false as const,
+      errors: [{ path: 'text', message: 'expected string', keyword: 'type' }],
+    };
+  }
   readonly calls: RecordedToolCall<EchoInput>[] = [];
 
   resolveExecution(args: EchoInput): ToolExecution {
@@ -71,6 +80,7 @@ export class FailingTool implements ExecutableTool<FailingInput> {
   readonly name = 'fail';
   readonly description = 'Always throws.';
   readonly parameters = RECORD_PARAMETERS;
+  validateArgs(args: unknown) { return { success: true as const, data: args }; }
   readonly calls: RecordedToolCall<FailingInput>[] = [];
   readonly errorMessage: string;
 
@@ -103,6 +113,7 @@ export class SlowTool implements ExecutableTool<SlowInput> {
   readonly name = 'slow';
   readonly description = 'Blocks until aborted.';
   readonly parameters = RECORD_PARAMETERS;
+  validateArgs(args: unknown) { return { success: true as const, data: args }; }
   readonly calls: RecordedToolCall<SlowInput>[] = [];
   readonly started: { resolve: () => void; promise: Promise<void> };
 
@@ -151,6 +162,7 @@ export class HangingTool implements ExecutableTool<Record<string, unknown>> {
   readonly name = 'hang';
   readonly description = 'Never settles, ignores abort.';
   readonly parameters = RECORD_PARAMETERS;
+  validateArgs(args: unknown) { return { success: true as const, data: args }; }
   readonly calls: RecordedToolCall<Record<string, unknown>>[] = [];
 
   resolveExecution(args: Record<string, unknown>): ToolExecution {
@@ -176,6 +188,7 @@ export class ProgressTool implements ExecutableTool<ProgressInput> {
   readonly name = 'progress';
   readonly description = 'Streams a few progress updates before returning.';
   readonly parameters = RECORD_PARAMETERS;
+  validateArgs(args: unknown) { return { success: true as const, data: args }; }
   readonly calls: RecordedToolCall<ProgressInput>[] = [];
   readonly updates: ToolUpdate[];
 
@@ -212,6 +225,15 @@ export class StrictArgsTool implements ExecutableTool<StrictInput> {
   readonly name = 'strict';
   readonly description = 'Requires { value: number }.';
   readonly parameters = STRICT_PARAMETERS;
+  validateArgs(args: unknown) {
+    if (typeof args === 'object' && args !== null && typeof (args as Record<string, unknown>)['value'] === 'number') {
+      return { success: true as const, data: args };
+    }
+    return {
+      success: false as const,
+      errors: [{ path: 'value', message: 'expected number', keyword: 'type' }],
+    };
+  }
   readonly calls: RecordedToolCall<StrictInput>[] = [];
 
   resolveExecution(args: StrictInput): ToolExecution {
@@ -237,6 +259,7 @@ export class ContentBlocksTool implements ExecutableTool<Record<string, unknown>
   readonly name = 'blocks';
   readonly description = 'Returns a structured ExecutableToolResult.';
   readonly parameters = RECORD_PARAMETERS;
+  validateArgs(args: unknown) { return { success: true as const, data: args }; }
   readonly calls: RecordedToolCall<Record<string, unknown>>[] = [];
   readonly result: ExecutableToolResult;
 
@@ -268,6 +291,7 @@ export class GatedTool implements ExecutableTool<Record<string, unknown>> {
   readonly name: string;
   readonly description = 'Waits for an external release signal.';
   readonly parameters = RECORD_PARAMETERS;
+  validateArgs(args: unknown) { return { success: true as const, data: args }; }
   readonly calls: RecordedToolCall<Record<string, unknown>>[] = [];
   readonly started: Promise<void>;
 

@@ -1,5 +1,6 @@
 import type { Message } from "@moonshot-ai/kosong";
-import { estimateTokensForMessage } from "../../utils/tokens";
+import { estimateTokensForMessage, estimateTokensForMessages } from "../../utils/tokens";
+import { getPruneTemplate } from './prune-templates';
 import type { CompactionSource } from "./types";
 
 export interface CompactionConfig {
@@ -31,6 +32,11 @@ export interface CompactionStrategy {
   reduceCompactOnOverflow(messages: readonly Message[]): number;
   readonly checkAfterStep: boolean;
   readonly maxCompactionPerTurn: number;
+  hardPrune(
+    messages: readonly Message[],
+    maxSize: number,
+    providerId: string,
+  ): Message[];
 }
 
 export class DefaultCompactionStrategy implements CompactionStrategy {
@@ -167,6 +173,22 @@ export class DefaultCompactionStrategy implements CompactionStrategy {
     }
 
     return bestN ?? compactedCount;
+  }
+
+  hardPrune(
+    messages: readonly Message[],
+    maxSize: number,
+    providerId: string,
+  ): Message[] {
+    const template = getPruneTemplate(providerId);
+    const pruned = [...messages];
+    while (estimateTokensForMessages(pruned) > maxSize && pruned.length > 2) {
+      const idx = pruned.findIndex(m => m.role === 'tool');
+      if (idx === -1) break;
+      const orig = pruned[idx]!;
+      pruned[idx] = { role: 'tool' as const, content: [{ type: 'text' as const, text: template }], toolCalls: [], toolCallId: orig.toolCallId ?? '' };
+    }
+    return pruned;
   }
 
   get checkAfterStep(): boolean {

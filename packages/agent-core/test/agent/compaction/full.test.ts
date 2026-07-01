@@ -1172,7 +1172,6 @@ describe('FullCompaction', () => {
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Answer after compacting" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
       [wire] full_compaction.begin       { "source": "auto", "time": "<time>" }
       [emit] compaction.started          { "trigger": "auto" }
-      [emit] compaction.blocked          { "turnId": 0 }
       [wire] usage.record                { "model": "kimi-code", "usage": { "inputOther": 498, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
       [emit] agent.status.updated        { "model": "kimi-code", "contextTokens": 950000, "maxContextTokens": 256000, "contextUsage": 3.7109375, "planMode": false, "swarmMode": false, "permission": "manual", "usage": { "byModel": { "kimi-code": { "inputOther": 498, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 498, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.apply_compaction    { "summary": "Auto compacted summary.", "compactedCount": 4, "tokensBefore": 46, "tokensAfter": 28, "time": "<time>" }
@@ -1407,6 +1406,7 @@ describe('FullCompaction', () => {
     const ctx = testAgent({
       initialConfig: {
         providers: {},
+        agentRole: 'default',
         loopControl: { reservedContextSize: 50_000 },
       },
     });
@@ -1434,6 +1434,7 @@ describe('FullCompaction', () => {
     const ctx = testAgent({
       initialConfig: {
         providers: {},
+        agentRole: 'default',
         loopControl: { reservedContextSize: 500 },
       },
     });
@@ -1974,6 +1975,7 @@ function oauthTestAgentOptions(
   return {
     initialConfig: {
       defaultModel: 'kimi-code',
+      agentRole: 'default',
       providers: {
         'managed:kimi-code': {
           type: 'vertexai',
@@ -2068,6 +2070,7 @@ const alwaysCompactOnce: CompactionStrategy = {
   shouldBlock: () => true,
   computeCompactCount: (messages: readonly Message[]) => messages.length,
   reduceCompactOnOverflow: (messages: readonly Message[]) => messages.length,
+  hardPrune: (messages: readonly Message[]) => [...messages],
   checkAfterStep: true,
   maxCompactionPerTurn: 1,
 };

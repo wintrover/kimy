@@ -1,4 +1,8 @@
-import type { PrepareToolExecutionResult, ResolvedToolExecutionHookContext } from '../../loop';
+import type {
+  PrepareToolExecutionResult,
+  ResolvedToolExecutionHookContext,
+  VirtualTurnTrigger,
+} from '../../loop';
 import type { ToolInputDisplay } from '../../tools/display';
 
 export type PermissionRuleDecision = 'allow' | 'deny' | 'ask';
@@ -71,7 +75,9 @@ export type PermissionPolicyResolution =
   | PermissionPolicyResult
   | ({ readonly kind: 'result' } & PrepareToolExecutionResult);
 
-export interface PermissionPolicyContext extends ResolvedToolExecutionHookContext {}
+export interface PermissionPolicyContext extends ResolvedToolExecutionHookContext {
+  virtualTurnTrigger?: VirtualTurnTrigger;
+}
 
 export type PermissionPolicyResult =
   | {

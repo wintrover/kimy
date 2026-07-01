@@ -110,6 +110,7 @@ describe('chatWithRetry: terminated stream drops', () => {
 function oauthConfig(): KimiConfig {
   return {
     defaultModel: 'kimi-code/kimi-for-coding',
+    agentRole: 'default',
     providers: {
       'managed:kimi-code': {
         type: 'kimi',

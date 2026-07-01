@@ -46,6 +46,7 @@ function testProviderManager(): ProviderManager {
   return new ProviderManager({
     config: {
       providers: { test: { type: MOCK_PROVIDER.type, apiKey: MOCK_PROVIDER.apiKey } },
+      agentRole: 'default',
       models: { [MOCK_PROVIDER.model]: { provider: 'test', model: MOCK_PROVIDER.model, maxContextSize: 1_000_000 } },
     },
   });
@@ -371,7 +372,7 @@ describe('goal session end-to-end', () => {
       ['GetGoal', 'UpdateGoal'],
       undefined,
       undefined,
-      { providers: {}, loopControl: { maxStepsPerTurn: 1 } },
+      { providers: {}, agentRole: 'default', loopControl: { maxStepsPerTurn: 1 } },
     );
     const api = new SessionAPIImpl(session);
     await api.createGoal({ agentId: 'main', objective: 'work' });

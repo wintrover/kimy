@@ -7,12 +7,23 @@ import type {
   SystemPromptRenderer,
 } from './types';
 
+import coderCapability from './default/capability_coder.md?raw';
+import orchestratorCapability from './default/capability_orchestrator.md?raw';
+
+const CAPABILITY_MAP: Record<string, string> = {
+  coder: coderCapability,
+  orchestrator: orchestratorCapability,
+};
+
 interface MergedAgentProfile {
   readonly name: string;
+  readonly type: 'coder' | 'orchestrator';
   readonly description?: string | undefined;
   readonly systemPromptTemplate: string;
   readonly promptVars: Record<string, string>;
   readonly tools: string[];
+  readonly temperature?: number | undefined;
+  readonly seed?: number | undefined;
   readonly whenToUse?: string | undefined;
   readonly subagents?: Record<string, RawSubagentProfile> | undefined;
 }
@@ -91,6 +102,7 @@ function resolveMergedProfile(
 
   const merged: MergedAgentProfile = {
     name: profile.name,
+    type: profile.type ?? parent?.type ?? 'coder',
     description: profile.description,
     systemPromptTemplate: profile.systemPromptTemplate ?? parent?.systemPromptTemplate ?? '',
     promptVars: {
@@ -98,6 +110,8 @@ function resolveMergedProfile(
       ...profile.promptVars,
     },
     tools: profile.tools !== undefined ? [...profile.tools] : [...(parent?.tools ?? [])],
+    temperature: profile.temperature ?? parent?.temperature,
+    seed: profile.seed ?? parent?.seed,
     whenToUse: profile.whenToUse ?? parent?.whenToUse,
     subagents: cloneSubagents(profile.subagents),
   };
@@ -112,6 +126,8 @@ function toResolvedProfile(merged: MergedAgentProfile): ResolvedAgentProfile {
     description: merged.description,
     systemPrompt: createSystemPromptRenderer(merged),
     tools: [...merged.tools],
+    temperature: merged.temperature,
+    seed: merged.seed,
     whenToUse: merged.whenToUse,
   };
 }
@@ -122,10 +138,13 @@ function toResolvedProfile(merged: MergedAgentProfile): ResolvedAgentProfile {
  * (KIMI_OS, KIMI_AGENTS_MD, ...) at render time.
  */
 function createSystemPromptRenderer(merged: MergedAgentProfile): SystemPromptRenderer {
+  const capability = CAPABILITY_MAP[merged.type] ?? coderCapability;
+  const fullTemplate = [merged.systemPromptTemplate, capability].join('\n\n');
+
   return (context: SystemPromptContext): string => {
     const vars = buildTemplateVars(context, merged.promptVars);
     try {
-      return renderPrompt(merged.systemPromptTemplate, vars);
+      return renderPrompt(fullTemplate, vars);
     } catch (error) {
       throw new Error(
         `Failed to render system prompt for agent profile "${merged.name}": ${

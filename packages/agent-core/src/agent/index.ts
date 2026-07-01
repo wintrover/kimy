@@ -25,7 +25,7 @@ import {
 } from './compaction';
 import { CronManager } from './cron';
 import { ConfigState } from './config';
-import { ContextMemory } from './context';
+import { ContextMemory, type ContextSnapshot } from './context';
 import { GoalMode } from './goal';
 import { HookEngine } from '../session/hooks';
 import { InjectionManager } from './injection/manager';
@@ -63,6 +63,7 @@ export interface AgentOptions {
   readonly kaos: Kaos;
   readonly config?: KimiConfig;
   readonly homedir?: string;
+  readonly planDir?: string;
   readonly rpc?: Partial<SDKAgentRPC>;
   readonly persistence?: AgentRecordPersistence;
   readonly type?: AgentType;
@@ -94,6 +95,7 @@ export class Agent {
 
   readonly kimiConfig?: KimiConfig;
   readonly homedir?: string;
+  readonly planDir?: string;
   readonly rpc?: Partial<SDKAgentRPC>;
   readonly toolServices?: ToolServices;
   readonly pluginSessionStarts: readonly EnabledPluginSessionStart[];
@@ -166,10 +168,11 @@ export class Agent {
     this.microCompaction = new MicroCompaction(this, options.microCompaction);
     this.context = new ContextMemory(this);
     this.config = new ConfigState(this);
+    this.planDir = options.planDir ?? this.config.cwd;
     this.turn = new TurnFlow(this);
     this.injection = new InjectionManager(this);
     this.permission = new PermissionManager(this, options.permission);
-    this.planMode = new PlanMode(this);
+    this.planMode = new PlanMode(this, this.planDir);
     this.swarmMode = new SwarmMode(this);
     this.usage = new UsageRecorder(this);
     this.skills = options.skills ? new SkillManager(this, options.skills) : null;
@@ -258,6 +261,14 @@ export class Agent {
     });
     this.config.update({ profileName: profile.name, systemPrompt });
     this.tools.setActiveTools(profile.tools);
+  }
+
+  snapshotContext(): ContextSnapshot {
+    return this.context.snapshot();
+  }
+
+  restoreContext(snapshot: ContextSnapshot): void {
+    this.context.restore(snapshot);
   }
 
   async resume(options?: AgentRecordsReplayOptions): Promise<{ warning?: string }> {

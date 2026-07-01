@@ -31,6 +31,7 @@ function resolveRuntimeProvider(input: {
 
 const BASE_CONFIG: KimiConfig = {
   defaultModel: 'kimi-code/kimi-for-coding',
+  agentRole: 'default',
   providers: {
     'managed:kimi-code': {
       type: 'kimi',
@@ -169,6 +170,7 @@ describe('resolveRuntimeProvider model metadata', () => {
       resolveRuntimeProvider({
         config: {
           providers: {},
+          agentRole: 'default',
         },
       }),
     ).toThrow(/No model is selected/);
@@ -192,6 +194,7 @@ describe('resolveRuntimeProvider model metadata', () => {
             type: 'vertexai',
           },
         },
+        agentRole: 'default',
         models: {
           gemini: {
             provider: 'vertex',
@@ -463,6 +466,7 @@ describe('resolveRuntimeProvider Kimi request headers', () => {
             apiKey: 'sk-openai',
           },
         },
+        agentRole: 'default',
         models: {
           'gpt-alias': {
             provider: 'openai',
@@ -497,6 +501,7 @@ describe('resolveRuntimeProvider customHeaders propagation', () => {
             customHeaders: { 'X-Custom': 'value' },
           },
         },
+        agentRole: 'default',
         models: {
           'claude-alias': { provider: 'anthropic', model: 'claude-runtime', maxContextSize: 200000 },
         },
@@ -520,6 +525,7 @@ describe('resolveRuntimeProvider customHeaders propagation', () => {
             customHeaders: { 'X-Custom': 'value' },
           },
         },
+        agentRole: 'default',
         models: {
           'gpt-alias': { provider: 'openai', model: 'gpt-runtime', maxContextSize: 200000 },
         },
@@ -543,6 +549,7 @@ describe('resolveRuntimeProvider customHeaders propagation', () => {
             customHeaders: { 'X-Custom': 'value' },
           },
         },
+        agentRole: 'default',
         models: {
           'resp-alias': {
             provider: 'openai_responses',
@@ -569,6 +576,7 @@ describe('resolveRuntimeProvider customHeaders propagation', () => {
           customHeaders: { 'X-Custom': 'original' },
         },
       },
+      agentRole: 'default',
       models: {
         'gpt-alias': { provider: 'openai', model: 'gpt-runtime', maxContextSize: 200000 },
       },
@@ -616,6 +624,7 @@ describe('ProviderManager prompt cache key', () => {
             apiKey: 'sk-openai',
           },
         },
+        agentRole: 'default',
         models: {
           'gpt-alias': {
             provider: 'openai',
@@ -635,7 +644,7 @@ describe('ProviderManager prompt cache key', () => {
   });
 
   it('reads the current config when constructed with a function', () => {
-    let sharedConfig: KimiConfig = { providers: {} };
+    let sharedConfig: KimiConfig = { providers: {}, agentRole: 'default' };
     const manager = new ProviderManager({
       config: () => sharedConfig,
       promptCacheKey: 'session-test',

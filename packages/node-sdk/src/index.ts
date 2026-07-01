@@ -87,3 +87,5 @@ export type {
 
 export * from '#/events';
 export type * from '#/types';
+export { createAgentContext } from '@moonshot-ai/agent-core';
+export type { AgentContext } from '@moonshot-ai/agent-core';

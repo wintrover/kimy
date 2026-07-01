@@ -288,6 +288,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       pluginSessionStarts,
       appVersion: this.appVersion,
       additionalDirs,
+      agentContext: options.agentContext,
     });
     try {
       session.metadata = {

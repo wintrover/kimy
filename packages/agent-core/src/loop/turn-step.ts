@@ -43,10 +43,14 @@ export interface ExecuteLoopStepDeps {
   readonly recordUsage: (usage: TokenUsage) => RecordStepUsageResult | void | Promise<RecordStepUsageResult | void>;
 }
 
-export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
+export interface ExecuteLoopStepResult {
   readonly usage: TokenUsage;
   readonly stopReason: LoopStepStopReason;
-}> {
+  /** True when the step ended due to a virtual-turn batch interception. */
+  readonly virtualTurn?: boolean | undefined;
+}
+
+export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<ExecuteLoopStepResult> {
   const {
     turnId,
     signal,
@@ -131,9 +135,11 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
   // contains tool calls.
   let effectiveStopReason: LoopStepStopReason =
     stopTurnAfterUsage && stopReason === 'tool_use' ? 'end_turn' : stopReason;
+  let virtualTurn: boolean | undefined;
   if (effectiveStopReason === 'tool_use') {
     const toolBatch = await runToolCallBatch(step, response);
     if (toolBatch.stopTurn) effectiveStopReason = 'end_turn';
+    virtualTurn = toolBatch.virtualTurn;
   }
 
   // When a tool batch runs, it drains paired `tool.result` events even when
@@ -173,6 +179,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     usage,
     stopReason:
       stopTurnAfterStep && effectiveStopReason === 'tool_use' ? 'end_turn' : effectiveStopReason,
+    virtualTurn,
   };
 }
 

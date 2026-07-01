@@ -85,6 +85,7 @@ function testProviderManager(): ProviderManager {
           apiKey: MOCK_PROVIDER.apiKey,
         },
       },
+      agentRole: 'default',
       models: {
         [MOCK_PROVIDER.model]: {
           provider: 'test',

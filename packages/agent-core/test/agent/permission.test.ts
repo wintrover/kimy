@@ -922,6 +922,92 @@ describe('Simple permission policy direct behavior', () => {
     ).toBeUndefined();
   });
 
+  it('sets virtualTurnTrigger when AgentSwarm is mixed with other tools', () => {
+    const policy = new AgentSwarmExclusiveDenyPermissionPolicy();
+    const agentSwarmCall = toolCall('call_agent_swarm', 'AgentSwarm', {
+      description: 'Review files',
+      prompt_template: 'Review {{item}}',
+      items: ['src/a.ts', 'src/b.ts'],
+    });
+    const readCall = toolCall('call_read', 'Read', { path: 'src/a.ts' });
+    const context = hookContext({
+      id: 'call_agent_swarm',
+      toolName: 'AgentSwarm',
+      toolCalls: [agentSwarmCall, readCall],
+    });
+
+    const result = policy.evaluate(context);
+
+    expect(result).toBeDefined();
+    expect(result!.kind).toBe('deny');
+    expect(context.virtualTurnTrigger).toEqual({
+      reason: 'agent-swarm-mixed-batch',
+      message: 'AgentSwarm must be the sole tool call. Regenerate with AgentSwarm alone.',
+    });
+  });
+
+  it('sets virtualTurnTrigger when multiple AgentSwarm calls are present', () => {
+    const policy = new AgentSwarmExclusiveDenyPermissionPolicy();
+    const first = toolCall('call_agent_swarm_1', 'AgentSwarm', {
+      description: 'Review files',
+      prompt_template: 'Review {{item}}',
+      items: ['src/a.ts', 'src/b.ts'],
+    });
+    const second = toolCall('call_agent_swarm_2', 'AgentSwarm', {
+      description: 'Review tests',
+      prompt_template: 'Review {{item}}',
+      items: ['test/a.ts', 'test/b.ts'],
+    });
+    const context = hookContext({
+      id: 'call_agent_swarm_1',
+      toolName: 'AgentSwarm',
+      toolCalls: [first, second],
+    });
+
+    const result = policy.evaluate(context);
+
+    expect(result).toBeDefined();
+    expect(result!.kind).toBe('deny');
+    expect(context.virtualTurnTrigger).toEqual({
+      reason: 'agent-swarm-mixed-batch',
+      message: 'AgentSwarm must be the sole tool call. Regenerate with AgentSwarm alone.',
+    });
+  });
+
+  it('does not set virtualTurnTrigger for a single AgentSwarm call', () => {
+    const policy = new AgentSwarmExclusiveDenyPermissionPolicy();
+    const agentSwarmCall = toolCall('call_agent_swarm', 'AgentSwarm', {
+      description: 'Review files',
+      prompt_template: 'Review {{item}}',
+      items: ['src/a.ts', 'src/b.ts'],
+    });
+    const context = hookContext({
+      id: 'call_agent_swarm',
+      toolName: 'AgentSwarm',
+      toolCalls: [agentSwarmCall],
+    });
+
+    const result = policy.evaluate(context);
+
+    expect(result).toBeUndefined();
+    expect(context.virtualTurnTrigger).toBeUndefined();
+  });
+
+  it('does not set virtualTurnTrigger when no AgentSwarm is present', () => {
+    const policy = new AgentSwarmExclusiveDenyPermissionPolicy();
+    const readCall = toolCall('call_read', 'Read', { path: 'src/a.ts' });
+    const context = hookContext({
+      id: 'call_read',
+      toolName: 'Read',
+      toolCalls: [readCall],
+    });
+
+    const result = policy.evaluate(context);
+
+    expect(result).toBeUndefined();
+    expect(context.virtualTurnTrigger).toBeUndefined();
+  });
+
   it('always asks in FallbackAskPermissionPolicy', () => {
     const policy = new FallbackAskPermissionPolicy();
 

@@ -22,6 +22,7 @@ function makeStartupInput(): KimiTUIStartupInput {
       yolo: false,
       auto: false,
       plan: false,
+      orchestrator: false,
       model: undefined,
       outputFormat: undefined,
       prompt: undefined,

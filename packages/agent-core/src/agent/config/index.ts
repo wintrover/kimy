@@ -1,7 +1,9 @@
 import {
   createProvider,
+  KimiChatProvider,
   UNKNOWN_CAPABILITY,
   type ChatProvider,
+  type GenerationKwargs,
   type ModelCapability,
   type ProviderConfig,
 } from '@moonshot-ai/kosong';
@@ -23,6 +25,9 @@ export class ConfigState {
   private _profileName: string | undefined;
   private _thinkingLevel: ThinkingEffort = 'off';
   private _systemPrompt: string = '';
+  private _temperature: number | undefined;
+  private _seed: number | undefined;
+  private _modelAliasResolver?: () => string | undefined;
 
   constructor(protected readonly agent: Agent) {
     this._cwd = agent.kaos.getcwd();
@@ -59,10 +64,29 @@ export class ConfigState {
     if (changed.systemPrompt !== undefined) {
       this._systemPrompt = changed.systemPrompt;
     }
+    if (changed.temperature !== undefined) {
+      this._temperature = changed.temperature;
+    }
+    if (changed.seed !== undefined) {
+      this._seed = changed.seed;
+    }
     if (this.hasProvider && (changed.cwd !== undefined || changed.modelAlias)) {
       this.agent.tools.initializeBuiltinTools();
     }
     this.agent.emitStatusUpdated();
+  }
+
+  /**
+   * Install (or clear) a lazy model-alias resolver for subagents.
+   * When set, the `modelAlias` getter falls back to the resolver
+   * whenever `_modelAlias` is undefined, enabling IoC Pull semantics
+   * so lifecycle methods never need to push modelAlias explicitly.
+   */
+  setModelAliasResolver(resolver: (() => string | undefined) | undefined): void {
+    this._modelAliasResolver = resolver;
+    if (resolver !== undefined && this.hasProvider) {
+      this.agent.tools.initializeBuiltinTools();
+    }
   }
 
   data(): AgentConfigData {
@@ -75,6 +99,8 @@ export class ConfigState {
       profileName: this.profileName,
       thinkingLevel: this.thinkingLevel,
       systemPrompt: this.systemPrompt,
+      temperature: this._temperature,
+      seed: this._seed,
     };
   }
 
@@ -83,7 +109,7 @@ export class ConfigState {
   }
 
   get hasModel(): boolean {
-    return this._modelAlias !== undefined;
+    return this.modelAlias !== undefined;
   }
 
   get hasProvider(): boolean {
@@ -105,18 +131,28 @@ export class ConfigState {
     //   - sampling params: KIMI_MODEL_TEMPERATURE / KIMI_MODEL_TOP_P
     //   - thinking.keep: KIMI_MODEL_THINKING_KEEP (only while thinking is on)
     const provider = createProvider(this.providerConfig).withThinking(this.thinkingLevel);
-    return applyKimiEnvThinkingKeep(applyKimiEnvSamplingParams(provider), this.thinkingLevel);
+    const withEnv = applyKimiEnvThinkingKeep(applyKimiEnvSamplingParams(provider), this.thinkingLevel);
+    return this.applyProfileSamplingParams(withEnv);
+  }
+
+  private applyProfileSamplingParams(provider: ChatProvider): ChatProvider {
+    if (!(provider instanceof KimiChatProvider)) return provider;
+    const kwargs: GenerationKwargs = {};
+    if (this._temperature !== undefined) kwargs.temperature = this._temperature;
+    if (this._seed !== undefined) kwargs.extra_body = { seed: this._seed };
+    return Object.keys(kwargs).length > 0 ? provider.withGenerationKwargs(kwargs) : provider;
   }
 
   get model(): string {
-    if (this._modelAlias === undefined) {
+    const alias = this.modelAlias;
+    if (alias === undefined) {
       throw new KimiError(ErrorCodes.MODEL_NOT_CONFIGURED, 'Model not set');
     }
-    return this._modelAlias;
+    return alias;
   }
 
   get modelAlias(): string | undefined {
-    return this._modelAlias;
+    return this._modelAliasResolver?.() ?? this._modelAlias;
   }
 
   get thinkingLevel(): ThinkingEffort {
@@ -151,8 +187,9 @@ export class ConfigState {
   }
 
   private get resolvedProviderConfig(): ResolvedRuntimeProvider | undefined {
-    if (this._modelAlias === undefined) return undefined;
-    return this.agent.modelProvider?.resolveProviderConfig(this._modelAlias);
+    const alias = this.modelAlias;
+    if (alias === undefined) return undefined;
+    return this.agent.modelProvider?.resolveProviderConfig(alias);
   }
 
   private tryResolvedProviderConfig(): ResolvedRuntimeProvider | undefined {

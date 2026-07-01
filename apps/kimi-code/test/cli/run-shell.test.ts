@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => {
       providers: {},
       defaultModel: 'k2',
       telemetry: true,
+      agentRole: 'default',
     })),
     harnessGetConfigDiagnostics: vi.fn(async () => ({ warnings: [] as readonly string[] })),
     harnessGetCachedAccessToken: vi.fn(),
@@ -139,9 +140,10 @@ vi.mock('../../src/migration/index', () => ({
   detectPendingMigration: mocks.detectPendingMigration,
 }));
 
-vi.mock('node:child_process', () => ({
-  execSync: mocks.execSync,
-}));
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return { ...actual, execSync: mocks.execSync };
+});
 
 describe('runShell', () => {
   afterEach(() => {
@@ -150,6 +152,7 @@ describe('runShell', () => {
       providers: {},
       defaultModel: 'k2',
       telemetry: true,
+      agentRole: 'default',
     });
     mocks.tuiGetStartupMcpMs.mockResolvedValue(0);
     mocks.tuiGetCurrentSessionId.mockReturnValue('');
@@ -181,6 +184,7 @@ describe('runShell', () => {
       outputFormat: undefined,
       prompt: undefined,
       skillsDirs: [],
+      orchestrator: false,
       addDirs: ['../shared', '/tmp/extra'],
     };
 
@@ -260,6 +264,7 @@ describe('runShell', () => {
         yolo: false,
         auto: false,
         plan: false,
+        orchestrator: false,
         model: undefined,
         outputFormat: undefined,
         prompt: undefined,
@@ -300,6 +305,7 @@ describe('runShell', () => {
         yolo: false,
         auto: false,
         plan: false,
+        orchestrator: false,
         model: undefined,
         outputFormat: undefined,
         prompt: undefined,
@@ -343,6 +349,7 @@ describe('runShell', () => {
         yolo: false,
         auto: false,
         plan: false,
+        orchestrator: false,
         model: undefined,
         outputFormat: undefined,
         prompt: undefined,
@@ -376,6 +383,7 @@ describe('runShell', () => {
         yolo: false,
         auto: false,
         plan: false,
+        orchestrator: false,
         model: undefined,
         outputFormat: undefined,
         prompt: undefined,
@@ -427,6 +435,7 @@ describe('runShell', () => {
         yolo: false,
         auto: false,
         plan: false,
+        orchestrator: false,
         model: undefined,
         outputFormat: undefined,
         prompt: undefined,
@@ -465,6 +474,7 @@ describe('runShell', () => {
         yolo: false,
         auto: false,
         plan: false,
+        orchestrator: false,
         model: undefined,
         outputFormat: undefined,
         prompt: undefined,
@@ -495,6 +505,7 @@ describe('runShell', () => {
           yolo: false,
           auto: false,
           plan: false,
+        orchestrator: false,
           model: undefined,
           outputFormat: undefined,
           prompt: undefined,
@@ -532,6 +543,7 @@ describe('runShell', () => {
           yolo: false,
           auto: false,
           plan: false,
+        orchestrator: false,
           model: undefined,
           outputFormat: undefined,
           prompt: undefined,
@@ -586,6 +598,7 @@ describe('runShell', () => {
           yolo: false,
           auto: false,
           plan: false,
+        orchestrator: false,
           model: undefined,
           outputFormat: undefined,
           prompt: undefined,
@@ -611,6 +624,108 @@ describe('runShell', () => {
     }
   });
 
+  it('merges config.toml agent_role orchestrator when CLI flag is false', async () => {
+    mocks.loadTuiConfig.mockResolvedValue({
+      theme: 'dark',
+      editorCommand: null,
+      notifications: { enabled: true, condition: 'unfocused' },
+    });
+    mocks.tuiStart.mockResolvedValue(undefined);
+    mocks.harnessGetConfig.mockResolvedValue({
+      providers: {},
+      defaultModel: 'k2',
+      telemetry: true,
+      agentRole: 'orchestrator',
+    });
+
+    await runShell(
+      {
+        session: undefined,
+        continue: false,
+        yolo: false,
+        auto: false,
+        plan: false,
+        orchestrator: false,
+        model: undefined,
+        outputFormat: undefined,
+        prompt: undefined,
+        skillsDirs: [],
+      },
+      '1.2.3-test',
+    );
+
+    const [, , startupInput] = mocks.kimiTuiConstructor.mock.calls[0]!;
+    expect(startupInput.cliOptions.orchestrator).toBe(true);
+  });
+
+  it('CLI orchestrator flag takes precedence over config.toml agent_role', async () => {
+    mocks.loadTuiConfig.mockResolvedValue({
+      theme: 'dark',
+      editorCommand: null,
+      notifications: { enabled: true, condition: 'unfocused' },
+    });
+    mocks.tuiStart.mockResolvedValue(undefined);
+    mocks.harnessGetConfig.mockResolvedValue({
+      providers: {},
+      defaultModel: 'k2',
+      telemetry: true,
+      agentRole: 'default',
+    });
+
+    await runShell(
+      {
+        session: undefined,
+        continue: false,
+        yolo: false,
+        auto: false,
+        plan: false,
+        orchestrator: true,
+        model: undefined,
+        outputFormat: undefined,
+        prompt: undefined,
+        skillsDirs: [],
+      },
+      '1.2.3-test',
+    );
+
+    const [, , startupInput] = mocks.kimiTuiConstructor.mock.calls[0]!;
+    expect(startupInput.cliOptions.orchestrator).toBe(true);
+  });
+
+  it('orchestrator stays false when both CLI flag and config.toml are unset', async () => {
+    mocks.loadTuiConfig.mockResolvedValue({
+      theme: 'dark',
+      editorCommand: null,
+      notifications: { enabled: true, condition: 'unfocused' },
+    });
+    mocks.tuiStart.mockResolvedValue(undefined);
+    mocks.harnessGetConfig.mockResolvedValue({
+      providers: {},
+      defaultModel: 'k2',
+      telemetry: true,
+      agentRole: 'default',
+    });
+
+    await runShell(
+      {
+        session: undefined,
+        continue: false,
+        yolo: false,
+        auto: false,
+        plan: false,
+        orchestrator: false,
+        model: undefined,
+        outputFormat: undefined,
+        prompt: undefined,
+        skillsDirs: [],
+      },
+      '1.2.3-test',
+    );
+
+    const [, , startupInput] = mocks.kimiTuiConstructor.mock.calls[0]!;
+    expect(startupInput.cliOptions.orchestrator).toBe(false);
+  });
+
   it('surfaces an invalid target config as an error for kimi migrate, not silently', async () => {
     mocks.loadTuiConfig.mockResolvedValue({
       theme: 'dark',
@@ -632,6 +747,7 @@ describe('runShell', () => {
           yolo: false,
           auto: false,
           plan: false,
+        orchestrator: false,
           model: undefined,
           outputFormat: undefined,
           prompt: undefined,

@@ -110,6 +110,7 @@ export class ProviderManager implements ModelProvider {
       this.options.kimiRequestHeaders,
       alias.maxOutputSize,
       alias.reasoningKey,
+      alias.reasoningEffort,
       this.options.promptCacheKey,
       alias.adaptiveThinking,
     );
@@ -222,6 +223,7 @@ function toKosongProviderConfig(
   kimiRequestHeaders: Record<string, string> | undefined,
   maxOutputSize: number | undefined,
   reasoningKey: string | undefined,
+  reasoningEffort: string | undefined,
   promptCacheKey: string | undefined,
   adaptiveThinking: boolean | undefined,
 ): KosongProviderConfig {
@@ -243,6 +245,7 @@ function toKosongProviderConfig(
         baseUrl: providerValue(provider.baseUrl, provider.env, 'OPENAI_BASE_URL'),
         apiKey: providerApiKey(provider),
         reasoningKey,
+        reasoningEffort,
         ...defaultHeadersField(provider.customHeaders),
       };
     case 'kimi':

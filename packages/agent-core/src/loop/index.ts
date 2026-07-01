@@ -23,6 +23,7 @@ export type {
   ShouldContinueAfterStopResult,
   LoopMessageBuilder,
   ExecutableTool,
+  ValidationError,
   ToolExecution,
   ToolCall,
   ExecutableToolContext,
@@ -36,6 +37,7 @@ export type {
   FinalizeToolResultHook,
   ToolUpdate,
   TurnResult,
+  VirtualTurnTrigger,
 } from './types';
 
 export { ToolAccesses } from './tool-access';

@@ -1,4 +1,5 @@
 import type {
+  AgentContext,
   ExportSessionManifest,
   ResumeSessionResult,
   ShellEnvironment,
@@ -15,6 +16,9 @@ export type JsonValue = JsonPrimitive | JsonValue[] | { readonly [key: string]: 
 export type JsonObject = { readonly [key: string]: JsonValue };
 
 export type Unsubscribe = () => void;
+
+export type { AgentContext } from '@moonshot-ai/agent-core';
+export { createAgentContext } from '@moonshot-ai/agent-core';
 
 export type {
   AgentReplayRecord,
@@ -98,6 +102,7 @@ export interface CreateSessionOptions {
   readonly thinking?: string | undefined;
   readonly permission?: PermissionMode | undefined;
   readonly planMode?: boolean;
+  readonly agentContext?: AgentContext;
   readonly metadata?: JsonObject | undefined;
   readonly kaos?: Kaos | undefined;
   readonly persistenceKaos?: Kaos | undefined;

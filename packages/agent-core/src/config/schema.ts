@@ -3,6 +3,9 @@ import { parsePattern } from '#/agent/permission/matches-rule';
 import { ErrorCodes, KimiError } from '#/errors';
 import { z } from 'zod';
 
+export const AgentRoles = { ORCHESTRATOR: 'orchestrator', DEFAULT: 'default' } as const;
+export type AgentRole = (typeof AgentRoles)[keyof typeof AgentRoles];
+
 export const ProviderTypeSchema = z.enum([
   'anthropic',
   'openai',
@@ -45,6 +48,7 @@ export const ModelAliasSchema = z.object({
   capabilities: z.array(z.string()).optional(),
   displayName: z.string().optional(),
   reasoningKey: z.string().optional(),
+  reasoningEffort: z.string().optional(),
   // Explicitly declare adaptive-thinking support, overriding the kosong
   // model-name version inference. Needed for custom-named Anthropic endpoints
   // whose model name does not encode a parseable Claude version.
@@ -91,6 +95,8 @@ export const LoopControlSchema = z.object({
   maxRalphIterations: z.number().int().min(-1).optional(),
   reservedContextSize: z.number().int().min(0).optional(),
   compactionTriggerRatio: z.number().min(0.5).max(0.99).optional(),
+  preemptiveCompactionRatio: z.number().min(0.5).max(0.95).optional(),
+  manifestSyncInterval: z.number().int().min(5).optional(),
 });
 
 export type LoopControl = z.infer<typeof LoopControlSchema>;
@@ -204,6 +210,7 @@ export const KimiConfigSchema = z.object({
   providers: z.record(z.string(), ProviderConfigSchema).default({}),
   defaultProvider: z.string().optional(),
   defaultModel: z.string().optional(),
+  subagentModel: z.string().optional(),
   models: z.record(z.string(), ModelAliasSchema).optional(),
   thinking: ThinkingConfigSchema.optional(),
   planMode: z.boolean().optional(),
@@ -220,6 +227,7 @@ export const KimiConfigSchema = z.object({
   background: BackgroundConfigSchema.optional(),
   experimental: ExperimentalConfigSchema.optional(),
   telemetry: z.boolean().optional(),
+  agentRole: z.enum(['default', 'orchestrator']).default('default'),
   raw: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -243,6 +251,7 @@ export const KimiConfigPatchSchema = z
     providers: z.record(z.string(), ProviderConfigPatchSchema).optional(),
     defaultProvider: z.string().optional(),
     defaultModel: z.string().optional(),
+    subagentModel: z.string().optional(),
     models: z.record(z.string(), ModelAliasPatchSchema).optional(),
     thinking: ThinkingConfigPatchSchema.optional(),
     planMode: z.boolean().optional(),
@@ -259,6 +268,7 @@ export const KimiConfigPatchSchema = z
     background: BackgroundConfigPatchSchema.optional(),
     experimental: ExperimentalConfigPatchSchema.optional(),
     telemetry: z.boolean().optional(),
+    agentRole: z.enum(['default', 'orchestrator']).optional(),
   })
   .strict();
 
@@ -267,6 +277,7 @@ export type KimiConfigPatch = z.infer<typeof KimiConfigPatchSchema>;
 export function getDefaultConfig(): KimiConfig {
   return {
     providers: {},
+    agentRole: 'default',
   };
 }
 

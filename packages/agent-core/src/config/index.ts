@@ -1,3 +1,4 @@
+export * from './agent-context';
 export * from './merge';
 export * from './path';
 export * from './resolve';

@@ -111,6 +111,11 @@ export class TurnFlow {
   private readonly interruptedTelemetryTurnIds = new Set<number>();
   private readonly stepFailureByTurn = new Map<number, LoopTurnInterruptedEvent>();
   private currentStep = 0;
+  private manifestSyncTurnId = -1;
+
+  get activeStep(): number {
+    return this.currentStep;
+  }
 
   constructor(protected readonly agent: Agent) {}
 
@@ -449,6 +454,7 @@ export class TurnFlow {
     signal: AbortSignal,
     standalone: boolean,
   ): Promise<TurnEndResult> {
+    await this.runManifestReconciliation(this.currentStep);
     this.currentStep = 0;
     this.stepToolCallKeys.clear();
     this.toolCallDupType.clear();
@@ -622,6 +628,7 @@ export class TurnFlow {
   private async runStepLoop(turnId: number, signal: AbortSignal): Promise<LoopTurnStopReason> {
     let stopHookContinuationUsed = false;
     let goalOutcomeMessageContinuationUsed = false;
+    let virtualTurnRetryUsed = false;
     const deduper = new ToolCallDeduplicator({ telemetry: this.agent.telemetry });
     await this.agent.mcp?.waitForInitialLoad(signal);
     // Surface the active goal at the start of the turn (append-only; no-op when
@@ -669,7 +676,32 @@ export class TurnFlow {
             },
             // oxlint-disable-next-line no-loop-func -- stop hook continuation state is scoped to this turn.
             shouldContinueAfterStop: async (ctx) => {
-              const { signal } = ctx;
+              const { signal, virtualTurn } = ctx;
+
+              // 0. Virtual-turn interceptor: when the tool batch was
+              //    intercepted (mixed AgentSwarm + leaf-tool batch), inject a
+              //    correction message and re-invoke the LLM exactly once. On
+              //    the second occurrence, fall through to normal stop so the
+              //    existing deny policy handles it.
+              if (virtualTurn === true && !virtualTurnRetryUsed) {
+                virtualTurnRetryUsed = true;
+                this.agent.context.appendUserMessage(
+                  [
+                    {
+                      type: 'text',
+                      text:
+                        'AgentSwarm must be the only tool call in a model response. ' +
+                        'Retry with a single AgentSwarm call by itself, then call any other tools after it returns.',
+                    },
+                  ],
+                  {
+                    kind: 'system_trigger',
+                    name: 'virtual_turn_correction',
+                  },
+                );
+                return { continue: true };
+              }
+
               // 1. Flush any steered user messages.
               if (this.flushSteerBuffer()) return { continue: true };
               signal.throwIfAborted();
@@ -924,6 +956,27 @@ export class TurnFlow {
   private shouldTrackApiError(turnId: number): boolean {
     const failure = this.stepFailureByTurn.get(turnId);
     return failure?.reason === 'error' && failure.activeStep !== undefined;
+  }
+
+  private async runManifestReconciliation(turnIndex: number): Promise<void> {
+    const ctx = this.agent.context;
+    const manifest = ctx.stateManifest;
+    const syncInterval = this.agent.kimiConfig?.loopControl?.manifestSyncInterval ?? 10;
+    if (turnIndex - this.manifestSyncTurnId < syncInterval) return;
+    if (manifest.completedTasks.size === 0) return;
+
+    const recentMessages = ctx.history.slice(-10);
+    const manifestText = manifest.toPromptString();
+    const syncPrompt = `<manifest-sync>\n${manifestText}\n</manifest-sync>\n\nCompare the manifest above with the recent conversation below and report any discrepancies. Reply with a JSON array of corrections or [].`;
+    try {
+      const provider = this.agent.config.provider;
+      const systemPrompt = this.agent.config.systemPrompt ?? '';
+      const synced = await this.agent.generate(provider, systemPrompt, [], [{ role: 'user' as const, content: [{ type: 'text' as const, text: syncPrompt }], toolCalls: [] }]);
+      if (synced?.message?.content?.some?.(p => p.type === 'text' && p.text.includes('correction'))) {
+        manifest.clear();
+      }
+    } catch {}
+    this.manifestSyncTurnId = turnIndex;
   }
 }
 

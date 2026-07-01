@@ -416,6 +416,40 @@ describe('SessionSubagentHost', () => {
     ]);
   });
 
+  it('removes orchestration tools (e.g. AgentSwarm) from the child agent', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.newEvents();
+
+    const child = testAgent();
+    const summary =
+      'Completed the delegated task and returned a detailed summary so the parent agent can continue without repeating the investigation work. '.repeat(
+        2,
+      );
+    child.mockNextResponse({ type: 'text', text: summary });
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn({
+      profileName: 'coder',
+      parentToolCallId: 'call_agent',
+      prompt: 'Implement the fix',
+      description: 'Fix bug',
+      runInBackground: false,
+      signal,
+    });
+
+    await expect(handle.completion).resolves.toMatchObject({ result: summary.trim() });
+
+    // AgentSwarm must never appear in the child's visible tool list
+    const childToolNames = child.llmCalls[0]?.tools.map((tool) => tool.name) ?? [];
+    expect(childToolNames).not.toContain('AgentSwarm');
+
+    // The child's tool data should also not list AgentSwarm as active
+    const agentSwarmEntry = child.agent.tools.data().find((t) => t.name === 'AgentSwarm');
+    expect(agentSwarmEntry?.active).not.toBe(true);
+  });
+
   it('rejects unknown subagent types before creating a child agent', async () => {
     const parent = testAgent();
     parent.configure();
@@ -1031,6 +1065,7 @@ describe('SessionSubagentHost', () => {
       generate,
       initialConfig: {
         providers: {},
+        agentRole: 'default',
         loopControl: { maxRetriesPerStep: 1 },
       },
     });
@@ -1103,6 +1138,84 @@ describe('SessionSubagentHost', () => {
     // than leave it on the stale model from its initial spawn.
     expect(child.agent.config.modelAlias).toBe(parent.agent.config.modelAlias);
     expect(child.agent.config.modelAlias).not.toBe('stale-model-from-initial-spawn');
+  });
+});
+
+describe('subagent model resolution', () => {
+  it('uses subagentModel from config over parent model for spawn', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.newEvents();
+    const child = testAgent();
+    const summary = 'Completed the delegated task with enough detail for the parent agent to continue confidently without repeating any of the child agent work. '.repeat(2);
+    child.mockNextResponse({ type: 'text', text: summary });
+    const session = fakeSession(parent.agent, child.agent, {}, { subagentModel: 'mock-model' });
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn({
+      profileName: 'coder',
+      parentToolCallId: 'call_agent',
+      prompt: 'Do the task',
+      description: 'Task',
+      runInBackground: false,
+      signal,
+    });
+    await handle.completion;
+
+    expect(child.agent.config.modelAlias).toBe('mock-model');
+  });
+
+  it('falls back to parent model when subagentModel is not set', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.newEvents();
+    const child = testAgent();
+    const summary = 'Completed the delegated task with enough detail for the parent agent to continue confidently without repeating any of the child agent work. '.repeat(2);
+    child.mockNextResponse({ type: 'text', text: summary });
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn({
+      profileName: 'coder',
+      parentToolCallId: 'call_agent',
+      prompt: 'Do the task',
+      description: 'Task',
+      runInBackground: false,
+      signal,
+    });
+    await handle.completion;
+
+    expect(child.agent.config.modelAlias).toBe(parent.agent.config.modelAlias);
+  });
+
+  it('subagent-host source has no direct parent.config.modelAlias outside resolveChildModel', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('pathe');
+    const source = readFileSync(
+      join(__dirname, '../../src/session/subagent-host.ts'),
+      'utf-8',
+    );
+    const lines = source.split('\n');
+    const violations: Array<{ line: number; content: string }> = [];
+    let insideResolveChildModel = false;
+    let braceDepth = 0;
+    for (const [i, line] of lines.entries()) {
+      if (line.includes('resolveChildModel(') && line.includes('private')) {
+        insideResolveChildModel = true;
+        braceDepth = 0;
+      }
+      if (insideResolveChildModel) {
+        braceDepth += (line.match(/\{/g) ?? []).length;
+        braceDepth -= (line.match(/\}/g) ?? []).length;
+        if (braceDepth <= 0 && i > 0) {
+          insideResolveChildModel = false;
+        }
+      }
+      if (!insideResolveChildModel && line.includes('parent.config.modelAlias')) {
+        violations.push({ line: i + 1, content: line.trim() });
+      }
+    }
+    expect(violations).toEqual([]);
   });
 });
 
@@ -1514,6 +1627,7 @@ function fakeSession(
   parent: Agent,
   child: Agent,
   metadataAgents: Session['metadata']['agents'] = {},
+  config?: { subagentModel?: string },
 ) {
   const agents = new Map<string, Agent>([['main', parent]]);
   if (metadataAgents['agent-0'] !== undefined) {
@@ -1521,7 +1635,7 @@ function fakeSession(
   }
   return {
     agents,
-    options: { kimiHomeDir: undefined },
+    options: { kimiHomeDir: undefined, config },
     metadata: {
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',

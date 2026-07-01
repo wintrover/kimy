@@ -6,6 +6,8 @@ import type { SessionWarning } from '@moonshot-ai/protocol';
 import { ErrorCodes, KimiError } from '#/errors';
 import { getRootLogger, log } from '#/logging/logger';
 import type { Logger, SessionLogHandle } from '#/logging/types';
+import type { AgentContext } from '#/config/agent-context';
+import { resolveKimiHome } from '#/config/path';
 import type { KimiConfig, SDKSessionRPC } from '#/rpc';
 import { proxyWithExtraPayload } from '#/rpc/types';
 
@@ -73,6 +75,7 @@ export interface SessionOptions {
   readonly appVersion?: string;
   readonly experimentalFlags?: ExperimentalFlagResolver;
   readonly additionalDirs?: readonly string[];
+  readonly agentContext?: AgentContext;
 }
 
 export interface SessionSkillConfig {
@@ -228,6 +231,14 @@ export class Session {
     this.refreshAgentBuiltinTools();
   }
 
+  /**
+   * Set a runtime override for the subagent model.
+   * `null` clears the override (inherit from parent), a string forces that model.
+   */
+  public setRuntimeSubagentModel(model: string | null): void {
+    this.requireMainAgent().subagentHost!.setRuntimeSubagentModel(model);
+  }
+
   getAdditionalDirs(): readonly string[] {
     return this.additionalDirs;
   }
@@ -284,9 +295,32 @@ export class Session {
     return this.persistenceKaos.withCwd(cwd);
   }
 
+  /**
+   * Resolve the profile key for the main agent.
+   *
+   * Priority:
+   *   1. Persisted profileName from wire replay (deterministic restoration)
+   *      — validated against DEFAULT_AGENT_PROFILES (poison pill guard)
+   *   2. Runtime context evaluation (fresh creation / fallback)
+   *
+   * The persisted value is the SSOT — once a session is created with a
+   * profile, that decision is frozen in wire.jsonl and survives any
+   * external config.toml changes.
+   */
+  private resolveProfileKey(persistedProfileName?: string): string {
+    if (persistedProfileName !== undefined && persistedProfileName in DEFAULT_AGENT_PROFILES) {
+      return persistedProfileName;
+    }
+    const useOrchestrator =
+      this.options.agentContext?.isOrchestrator ??
+      (this.options.config?.agentRole === 'orchestrator');
+    return useOrchestrator ? 'delegator' : 'agent';
+  }
+
   async createMain() {
+    const profileKey = this.resolveProfileKey();
     const { agent } = await this.createAgent({ type: 'main' }, {
-      profile: DEFAULT_AGENT_PROFILES['agent'],
+      profile: DEFAULT_AGENT_PROFILES[profileKey],
     });
     await this.triggerSessionStart('startup');
     return agent;
@@ -304,12 +338,15 @@ export class Session {
     // A session migrated from an external tool ships a wire without the
     // `config.update` bootstrap events a natively-created agent writes, so the
     // main agent comes back with an empty system prompt and no tools. Apply the
-    // default profile so the resumed session is usable. Native sessions always
+    // resolved profile so the resumed session is usable. Native sessions always
     // replay a non-empty system prompt and never enter this branch.
     const main = this.getReadyAgent('main');
-    const profile = DEFAULT_AGENT_PROFILES['agent'];
-    if (main !== undefined && profile !== undefined && main.config.systemPrompt === '') {
-      await this.bootstrapAgentProfile(main, profile);
+    if (main !== undefined && main.config.systemPrompt === '') {
+      const profileKey = this.resolveProfileKey(main.config.profileName);
+      const profile = DEFAULT_AGENT_PROFILES[profileKey];
+      if (profile !== undefined) {
+        await this.bootstrapAgentProfile(main, profile);
+      }
     }
     await this.triggerSessionStart('resume');
     return { warning };
@@ -667,6 +704,7 @@ export class Session {
   ): Agent {
     const parentAgent = parentAgentId !== null ? this.getReadyAgent(parentAgentId) : undefined;
     const cwd = parentAgent?.config.cwd ?? this.toolKaos.getcwd();
+    const planDir = resolveKimiHome(this.options.kimiHomeDir);
     return new Agent({
       ...config,
       type,
@@ -674,11 +712,12 @@ export class Session {
       toolServices: this.options.toolServices,
       config: this.options.config,
       homedir,
+      planDir,
       skills: this.skills,
       rpc: proxyWithExtraPayload(this.rpc, { agentId: id }),
       modelProvider: this.options.providerManager,
       hookEngine: config.hookEngine ?? this.hookEngine,
-      subagentHost: config.subagentHost ?? new SessionSubagentHost(this, id),
+      subagentHost: config.subagentHost ?? new SessionSubagentHost(this, id, this.options.agentContext),
       mcp: this.mcp,
       permission: this.permissionOptions(parentAgentId, config.permission),
       telemetry: this.telemetry,

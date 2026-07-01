@@ -137,6 +137,10 @@ export function createCommandKaos(stdout: string): Kaos {
     execWithEnv: vi.fn().mockImplementation(async () => createProcess()),
     mkdir: vi.fn().mockResolvedValue(undefined),
     writeText: vi.fn(async (_path: string, content: string) => content.length),
+    stat: vi.fn().mockResolvedValue({ stMtime: Date.now() / 1000, stMode: 0o040755 } as any),
+    iterdir: vi.fn(async function* (): AsyncGenerator<string> {
+      // empty plans directory
+    }),
   });
 }
 
@@ -1044,7 +1048,7 @@ function configStateSnapshot(agent: Agent): ResumeStateSnapshot['config'] {
 }
 
 function emptyConfig(): KimiConfig {
-  return configWithProvider({ providers: {} }, MOCK_PROVIDER, undefined);
+  return configWithProvider({ providers: {}, agentRole: 'default' }, MOCK_PROVIDER, undefined);
 }
 
 function configWithProvider(
