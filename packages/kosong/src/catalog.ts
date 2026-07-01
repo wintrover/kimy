@@ -59,6 +59,22 @@ function isWireType(value: unknown): value is ProviderType {
   return typeof value === 'string' && (KNOWN_WIRE_TYPES as readonly string[]).includes(value);
 }
 
+/**
+ * Provider identifier → wire type mapping table.
+ * Add one entry here when onboarding a new OpenAI-compatible provider.
+ * Double-frozen: `as const` for compile-time narrowing, `Object.freeze` for runtime immutability.
+ */
+const PROVIDER_WIRE_MAP: Record<string, ProviderType> = {
+  'anthropic': 'anthropic',
+  'claude': 'anthropic',
+  'vertex': 'vertexai',
+  'google': 'google-genai',
+  'gemini': 'google-genai',
+  'openai': 'openai',
+  'nvidia': 'openai',
+} as const;
+Object.freeze(PROVIDER_WIRE_MAP);
+
 function hasEmbeddingMarker(value: string | undefined): boolean {
   if (value === undefined) return false;
   const lower = value.toLowerCase();
@@ -81,17 +97,21 @@ function isUsableChatModel(model: CatalogModelEntry): boolean {
  * `undefined` so callers can omit them instead of writing an invalid config.
  */
 export function inferWireType(entry: CatalogProviderEntry): ProviderType | undefined {
+  // 1) Explicit type wins if already a known wire type.
   if (isWireType(entry.type)) return entry.type;
-  const npm = (entry.npm ?? '').toLowerCase();
-  const id = (entry.id ?? '').toLowerCase();
-  if (npm.includes('anthropic') || id.includes('anthropic') || id.includes('claude')) {
-    return 'anthropic';
+
+  // 2) O(1) exact key lookup on normalized id / npm.
+  const id = entry.id?.toLowerCase();
+  const npm = entry.npm?.toLowerCase();
+  if (id !== undefined && id in PROVIDER_WIRE_MAP) return PROVIDER_WIRE_MAP[id];
+  if (npm !== undefined && npm in PROVIDER_WIRE_MAP) return PROVIDER_WIRE_MAP[npm];
+
+  // 3) Fallback: scoped npm packages (e.g. @anthropic-ai/sdk) — substring match.
+  const npmOrId = npm ?? id ?? '';
+  for (const keyword of Object.keys(PROVIDER_WIRE_MAP)) {
+    if (npmOrId.includes(keyword)) return PROVIDER_WIRE_MAP[keyword];
   }
-  if (id.includes('vertex')) return 'vertexai';
-  if (npm.includes('google') || id.includes('google') || id.includes('gemini')) {
-    return 'google-genai';
-  }
-  if (npm.includes('openai') || id.includes('openai')) return 'openai';
+
   return undefined;
 }
 

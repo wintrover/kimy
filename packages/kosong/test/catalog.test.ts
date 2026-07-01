@@ -23,6 +23,16 @@ describe('inferWireType', () => {
     expect(inferWireType({ id: 'google-vertex' })).toBe('vertexai');
   });
 
+  it('infers openai for nvidia (OpenAI-compatible provider)', () => {
+    expect(inferWireType({ id: 'nvidia' })).toBe('openai');
+    expect(inferWireType({ id: 'nvidia', npm: '@nvidia-ai/sdk' })).toBe('openai');
+  });
+
+  it('infers nvidia as openai-compatible from id or scoped npm', () => {
+    expect(inferWireType({ id: 'nvidia' })).toBe('openai');
+    expect(inferWireType({ id: 'nvidia', npm: '@nvidia-ai/sdk' })).toBe('openai');
+  });
+
   it('returns undefined for unknown / invalid wire types', () => {
     expect(inferWireType({ id: 'some-proxy' })).toBeUndefined();
     expect(inferWireType({ id: 'x', type: 'not-a-wire' })).toBeUndefined();
