@@ -227,7 +227,9 @@ export const KimiConfigSchema = z.object({
   background: BackgroundConfigSchema.optional(),
   experimental: ExperimentalConfigSchema.optional(),
   telemetry: z.boolean().optional(),
-  agentRole: z.enum(['default', 'orchestrator']).default('default'),
+  agentRole: z.enum(['default', 'orchestrator']).default(
+    process.env.KIMY_MODE === 'coder' ? 'default' : 'orchestrator'
+  ),
   raw: z.record(z.string(), z.unknown()).optional(),
 });
 

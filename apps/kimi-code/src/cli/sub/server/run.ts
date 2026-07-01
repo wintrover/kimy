@@ -19,6 +19,7 @@ import chalk from 'chalk';
 import { Option, type Command } from 'commander';
 
 import { CLI_SHUTDOWN_TIMEOUT_MS, WEB_UI_MODE } from '#/constant/app';
+import { getNativeWebAssetsDir } from '#/native/web-assets';
 import { darkColors } from '#/tui/theme/colors';
 import { openUrl as defaultOpenUrl } from '#/utils/open-url';
 import { getDataDir } from '#/utils/paths';
@@ -401,8 +402,10 @@ function serverWebAssetsDir(): string {
   return resolveServerWebAssetsDir();
 }
 
-export function resolveServerWebAssetsDir(): string {
-  return join(getHostPackageRoot(), WEB_ASSETS_DIR);
+export function resolveServerWebAssetsDir(
+  nativeWebAssetsDir: string | null = getNativeWebAssetsDir(),
+): string {
+  return nativeWebAssetsDir ?? join(getHostPackageRoot(), WEB_ASSETS_DIR);
 }
 
 interface FormatReadyBannerOptions {

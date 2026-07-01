@@ -359,6 +359,7 @@ export class SessionSubagentHost {
       await runChildTurnToCompletion(child, options.signal);
       result = lastAssistantText(child);
     }
+    result = parent.projection.projectSubagentResult(result, 'sub');
     const usage = child.usage.data().total;
     parent.emitEvent({
       type: 'subagent.completed',
@@ -412,7 +413,7 @@ export class SessionSubagentHost {
     const context = await prepareSystemPromptContext(
       this.session.systemContextKaos(child.kaos.getcwd()),
       this.session.options.kimiHomeDir,
-      { additionalDirs: child.getAdditionalDirs() },
+      { additionalDirs: child.getAdditionalDirs(), agentType: child.type },
     );
     child.useProfile(profile, context);
     child.tools.inheritUserTools(parent.tools);
@@ -420,6 +421,13 @@ export class SessionSubagentHost {
     // Sub-agents must not have access to orchestration tools (e.g. AgentSwarm)
     // to prevent infinite nesting of swarm calls.
     child.tools.removeFromActiveTools([...ORCHESTRATION_TOOLS]);
+
+    // If the parent is in plan mode, physically remove write tools from the child
+    // to prevent circumventing plan-mode restrictions through delegation.
+    if (parent.planMode.isActive) {
+      child.parentPlanModeActive = true;
+      child.tools.removeFromActiveTools(['Write', 'Edit']);
+    }
   }
 
   private async triggerSubagentStart(

@@ -12,7 +12,7 @@ export class PlanModeGuardDenyPermissionPolicy extends BasePermissionPolicy {
   }
 
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
-    if (!this.agent.planMode.isActive) return;
+    if (!this.agent.planMode.isActive && !this.agent.parentPlanModeActive) return;
 
     const toolName = context.toolCall.name;
     if (toolName === 'Write' || toolName === 'Edit') {

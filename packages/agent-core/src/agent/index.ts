@@ -26,6 +26,7 @@ import {
 import { CronManager } from './cron';
 import { ConfigState } from './config';
 import { ContextMemory, type ContextSnapshot } from './context';
+import { ContextProjection } from './context/context-projection';
 import { GoalMode } from './goal';
 import { HookEngine } from '../session/hooks';
 import { InjectionManager } from './injection/manager';
@@ -119,6 +120,7 @@ export class Agent {
   readonly injection: InjectionManager;
   readonly permission: PermissionManager;
   readonly planMode: PlanMode;
+  parentPlanModeActive = false;
   readonly swarmMode: SwarmMode;
   readonly usage: UsageRecorder;
   readonly skills: SkillManager | null;
@@ -127,11 +129,13 @@ export class Agent {
   readonly cron: CronManager | null;
   readonly goal: GoalMode;
   readonly replayBuilder: ReplayBuilder;
+  readonly projection: ContextProjection;
 
   private additionalDirs: readonly string[];
 
   constructor(options: AgentOptions) {
     this.type = options.type ?? 'main';
+    this.projection = new ContextProjection(this.type);
     this._kaos = options.kaos;
     this.kimiConfig = options.config;
     this.homedir = options.homedir;
@@ -260,6 +264,7 @@ export class Agent {
       additionalDirsInfo: context?.additionalDirsInfo,
     });
     this.config.update({ profileName: profile.name, systemPrompt });
+    this.tools.setProfileType(profile.type ?? 'coder');
     this.tools.setActiveTools(profile.tools);
   }
 

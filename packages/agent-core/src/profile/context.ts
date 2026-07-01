@@ -24,6 +24,16 @@ export interface PreparedSystemPromptContext
 
 export interface PrepareSystemPromptContextOptions {
   readonly additionalDirs?: readonly string[];
+  readonly agentType?: string;
+}
+
+/**
+ * Strip <orchestrator-only> blocks from AGENTS.md content for non-orchestrator agents.
+ * Orchestrator agents see the full content; all other agents have these blocks removed.
+ */
+export function stripOrchestratorOnlyBlocks(content: string, agentType?: string): string {
+  if (agentType === 'main') return content;
+  return content.replace(/<orchestrator-only>[\s\S]*?<\/orchestrator-only>\s*\n?/gi, '');
 }
 
 export async function prepareSystemPromptContext(
@@ -39,7 +49,7 @@ export async function prepareSystemPromptContext(
   ]);
   return {
     cwdListing,
-    agentsMd: agentsMdResult.content,
+    agentsMd: stripOrchestratorOnlyBlocks(agentsMdResult.content, options?.agentType),
     additionalDirsInfo,
     agentsMdWarning: agentsMdResult.warning,
   };

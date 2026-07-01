@@ -49,6 +49,7 @@ export class ToolManager {
   private mcpAccessPatterns: string[] = [];
   protected readonly store: Partial<ToolStoreData> = {};
   private mcpToolStatusUnsubscribe: (() => void) | undefined;
+  private profileType?: string;
 
   constructor(protected readonly agent: Agent) {
     this.attachMcpTools();
@@ -313,6 +314,16 @@ export class ToolManager {
   }
 
   setActiveTools(names: readonly string[]): void {
+    const ORCHESTRATOR_FORBIDDEN_TOOLS = new Set(['Edit', 'Write', 'Bash']);
+    if (this.profileType === 'orchestrator') {
+      const violations = names.filter(n => ORCHESTRATOR_FORBIDDEN_TOOLS.has(n));
+      if (violations.length > 0) {
+        throw new Error(
+          `CRITICAL_SECURITY_VIOLATION: Orchestrator profile cannot load coding tools: ${violations.join(', ')}. ` +
+          `Check delegator.yaml and profile resolution logic.`
+        );
+      }
+    }
     this.agent.records.logRecord({
       type: 'tools.set_active_tools',
       names,
@@ -321,6 +332,10 @@ export class ToolManager {
     // builtin/user tool names. The split keeps every caller on one string[].
     this.enabledTools = new Set(names.filter((name) => !isMcpToolName(name)));
     this.mcpAccessPatterns = names.filter((name) => isMcpToolName(name));
+  }
+
+  setProfileType(type: string): void {
+    this.profileType = type;
   }
 
   copyLoopToolsFrom(source: ToolManager): void {

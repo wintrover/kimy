@@ -91,6 +91,7 @@ describe('detectInstallSource', () => {
         getPackageRoot: () =>
           '/Users/me/Library/pnpm/global/5/node_modules/@moonshot-ai/kimi-code',
         getGlobalPrefix: async () => '/usr/local',
+        detectNative: () => false,
         platform: 'darwin',
       }),
     ).resolves.toBe('pnpm-global');
@@ -101,6 +102,7 @@ describe('detectInstallSource', () => {
       detectInstallSource({
         getPackageRoot: () => '/Users/me/.config/yarn/global/node_modules/@moonshot-ai/kimi-code',
         getGlobalPrefix: async () => '/usr/local',
+        detectNative: () => false,
         platform: 'darwin',
       }),
     ).resolves.toBe('yarn-global');
@@ -111,6 +113,7 @@ describe('detectInstallSource', () => {
       detectInstallSource({
         getPackageRoot: () => '/Users/me/.bun/install/global/node_modules/@moonshot-ai/kimi-code',
         getGlobalPrefix: async () => '/usr/local',
+        detectNative: () => false,
         platform: 'darwin',
       }),
     ).resolves.toBe('bun-global');
@@ -121,6 +124,7 @@ describe('detectInstallSource', () => {
       detectInstallSource({
         getPackageRoot: () => '/usr/local/lib/node_modules/@moonshot-ai/kimi-code',
         getGlobalPrefix: async () => '/usr/local',
+        detectNative: () => false,
         platform: 'darwin',
       }),
     ).resolves.toBe('npm-global');
@@ -132,9 +136,21 @@ describe('detectInstallSource', () => {
         getPackageRoot: () =>
           '/opt/homebrew/Cellar/kimi-code/0.5.0/libexec/lib/node_modules/@moonshot-ai/kimi-code',
         getGlobalPrefix: async () => '/usr/local',
+        detectNative: () => false,
         platform: 'darwin',
       }),
     ).resolves.toBe('homebrew');
+  });
+
+  it('returns native when SEA isSea() is true (highest priority)', async () => {
+    await expect(
+      detectInstallSource({
+        getPackageRoot: () => '/usr/local/lib/node_modules/@moonshot-ai/kimi-code',
+        getGlobalPrefix: async () => '/usr/local',
+        detectNative: () => true,
+        platform: 'darwin',
+      }),
+    ).resolves.toBe('native');
   });
 
   it('returns unsupported when nothing matches', async () => {
@@ -142,6 +158,7 @@ describe('detectInstallSource', () => {
       detectInstallSource({
         getPackageRoot: () => '/Users/me/dev/@moonshot-ai/kimi-code',
         getGlobalPrefix: async () => '/usr/local',
+        detectNative: () => false,
         platform: 'darwin',
       }),
     ).resolves.toBe('unsupported');
@@ -154,6 +171,7 @@ describe('detectInstallSource', () => {
         getGlobalPrefix: async () => {
           throw new Error('prefix failed');
         },
+        detectNative: () => false,
         platform: 'darwin',
       }),
     ).resolves.toBe('unsupported');

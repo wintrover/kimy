@@ -11,6 +11,7 @@ const InstallSourceSchema: z.ZodType<InstallSource> = z.enum([
   'yarn-global',
   'bun-global',
   'homebrew',
+  'native',
   'unsupported',
 ]);
 

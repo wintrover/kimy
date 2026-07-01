@@ -397,7 +397,11 @@ export class ContextMemory {
         // closed in place at a step boundary (a stale duplicate from an older
         // tail-only finishResume), or its call is gone.
         if (!this.pendingToolResultIds.has(event.toolCallId)) return;
-        const message = createToolMessage(event.toolCallId, toolResultOutputForModel(event.result));
+        const rawOutput = toolResultOutputForModel(event.result);
+        const projectedOutput = typeof rawOutput === 'string'
+          ? this.agent.projection.projectToolResult(rawOutput)
+          : rawOutput;
+        const message = createToolMessage(event.toolCallId, projectedOutput);
         this.pushHistory({
           ...message,
           role: 'tool',

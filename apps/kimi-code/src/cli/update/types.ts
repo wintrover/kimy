@@ -9,6 +9,7 @@ export type InstallSource =
   | 'yarn-global'
   | 'bun-global'
   | 'homebrew'
+  | 'native'
   | 'unsupported';
 
 export interface UpdateTarget {
