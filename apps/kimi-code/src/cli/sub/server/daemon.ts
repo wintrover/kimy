@@ -18,7 +18,6 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
@@ -142,51 +141,14 @@ export async function resolveDaemonPort(
   return getFreePort(host);
 }
 
-interface NodeSeaModule {
-  isSea(): boolean;
-}
-
-const nodeRequire = createRequire(import.meta.url);
-let cachedSea: NodeSeaModule | null | undefined;
-
-function loadSeaModule(): NodeSeaModule | null {
-  if (cachedSea !== undefined) return cachedSea;
-  try {
-    cachedSea = nodeRequire('node:sea') as NodeSeaModule;
-  } catch {
-    cachedSea = null;
-  }
-  return cachedSea;
-}
-
-/** True when running as a compiled single-executable (SEA / native) binary. */
-function detectSea(): boolean {
-  const sea = loadSeaModule();
-  if (sea === null) return false;
-  try {
-    return sea.isSea();
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Absolute path to the CLI entry that should be re-execed to run the daemon.
- * Mirrors `resolveSupervisorProgram` in `packages/server/src/svc/program.ts`:
- * when the CLI is a compiled single binary, `argv[1]` is the invoked command
- * name (e.g. `kimi`) or the first user argument — never a script path — so we
- * must re-exec `process.execPath` itself.
  */
 export function resolveDaemonProgram(
   argv: readonly string[] = process.argv,
   cwd: string = process.cwd(),
   execPath: string = process.execPath,
-  isSea: boolean = detectSea(),
 ): string {
-  // In a SEA binary `argv[1]` is not a script path, so resolving it against
-  // `cwd` would produce a bogus path (e.g. `<cwd>/kimi`) and crash the spawn
-  // with ENOENT. Always re-exec the binary itself.
-  if (isSea) return execPath;
   const candidate = argv[1] === 'server' ? execPath : (argv[1] ?? execPath);
   return isAbsolute(candidate) ? candidate : resolve(cwd, candidate);
 }

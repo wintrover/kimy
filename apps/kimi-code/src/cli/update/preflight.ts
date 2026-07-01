@@ -3,10 +3,6 @@ import { spawn } from 'node:child_process';
 import { log, type Logger } from '@moonshot-ai/kimi-code-sdk';
 import type { TelemetryProperties } from '@moonshot-ai/kimi-telemetry';
 
-import {
-  NATIVE_INSTALL_COMMAND_UNIX,
-  NATIVE_INSTALL_COMMAND_WIN,
-} from '#/constant/app';
 import { loadTuiConfig } from '#/tui/config';
 
 import { readUpdateCache } from './cache';
@@ -79,8 +75,6 @@ export function installCommandFor(
       return `bun add -g ${NPM_PACKAGE_NAME}@${version}`;
     case 'homebrew':
       return 'brew upgrade kimi-code';
-    case 'native':
-      return platform === 'win32' ? NATIVE_INSTALL_COMMAND_WIN : NATIVE_INSTALL_COMMAND_UNIX;
     case 'unsupported':
       return `npm install -g ${NPM_PACKAGE_NAME}@${version}`;
   }
@@ -97,8 +91,6 @@ export function canAutoInstall(source: InstallSource, platform: NodeJS.Platform)
       // Homebrew upgrade may mutate other dependents and the formula can lag
       // behind the CDN release — prompt the user to run `brew upgrade` manually.
       return false;
-    case 'native':
-      return platform !== 'win32';
     case 'unsupported':
       return false;
   }
@@ -125,13 +117,6 @@ export function spawnForSource(
       return { cmd: bunCommand(platform), args: ['add', '-g', `${NPM_PACKAGE_NAME}@${version}`] };
     case 'homebrew':
       return { cmd: 'brew', args: ['upgrade', 'kimi-code'] };
-    case 'native':
-      // `curl … | bash` reports only the trailing bash's exit status, so a
-      // failed download (curl can't connect → empty stdin → bash exits 0)
-      // would look like a successful update. `pipefail` makes the pipeline
-      // surface curl's non-zero status so installUpdate() rejects and we warn
-      // instead of printing "Updated …".
-      return { cmd: 'bash', args: ['-c', `set -o pipefail; ${NATIVE_INSTALL_COMMAND_UNIX}`] };
     case 'unsupported':
       throw new Error('unsupported install source cannot be auto-installed');
   }
@@ -157,9 +142,6 @@ export function renderManualUpdateMessage(
       break;
     case 'homebrew':
       sourceDesc = 'homebrew';
-      break;
-    case 'native':
-      sourceDesc = 'native (windows). Auto-update is not supported on this platform.';
       break;
     case 'unsupported':
       sourceDesc = 'unsupported package manager or layout.';
