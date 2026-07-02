@@ -40,9 +40,13 @@ export const ProviderConfigSchema = z.object({
 
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 
+const MODEL_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._\-\/:]*$/;
+
 export const ModelAliasSchema = z.object({
-  provider: z.string(),
-  model: z.string(),
+  provider: z.string().min(1, 'provider must not be empty'),
+  model: z.string()
+    .min(1, 'model must not be empty')
+    .regex(MODEL_ID_PATTERN, 'model ID: alphanumeric start, then [a-zA-Z0-9._\\-\\/:]+'),
   maxContextSize: z.number().int().min(1),
   maxOutputSize: z.number().int().min(1).optional(),
   capabilities: z.array(z.string()).optional(),
@@ -211,6 +215,7 @@ export const KimiConfigSchema = z.object({
   defaultProvider: z.string().optional(),
   defaultModel: z.string().optional(),
   subagentModel: z.string().optional(),
+  subagentFallbackModel: z.string().optional(),
   models: z.record(z.string(), ModelAliasSchema).optional(),
   thinking: ThinkingConfigSchema.optional(),
   planMode: z.boolean().optional(),
@@ -231,6 +236,15 @@ export const KimiConfigSchema = z.object({
     process.env.KIMY_MODE === 'coder' ? 'default' : 'orchestrator'
   ),
   raw: z.record(z.string(), z.unknown()).optional(),
+}).superRefine((config, ctx) => {
+  if (config.subagentFallbackModel && config.models
+      && !config.models[config.subagentFallbackModel]) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `"${config.subagentFallbackModel}" not found in [models]`,
+      path: ['subagentFallbackModel'],
+    });
+  }
 });
 
 export type KimiConfig = z.infer<typeof KimiConfigSchema>;
@@ -254,6 +268,7 @@ export const KimiConfigPatchSchema = z
     defaultProvider: z.string().optional(),
     defaultModel: z.string().optional(),
     subagentModel: z.string().optional(),
+    subagentFallbackModel: z.string().optional(),
     models: z.record(z.string(), ModelAliasPatchSchema).optional(),
     thinking: ThinkingConfigPatchSchema.optional(),
     planMode: z.boolean().optional(),

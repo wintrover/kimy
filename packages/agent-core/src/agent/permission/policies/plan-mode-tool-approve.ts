@@ -19,6 +19,12 @@ export class PlanModeToolApprovePermissionPolicy extends BasePermissionPolicy {
       };
     }
 
+    if (toolName === 'SavePlan' && this.agent.planMode.isActive) {
+      return {
+        kind: 'approve',
+      };
+    }
+
     if (
       (toolName === 'Write' || toolName === 'Edit') &&
       this.agent.planMode.isActive &&

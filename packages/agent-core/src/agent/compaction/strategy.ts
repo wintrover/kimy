@@ -19,7 +19,7 @@ export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
   blockRatio: 0.85, // Same as triggerRatio to disable async compaction
   reservedContextSize: 50_000,
   maxCompactionPerTurn: Infinity,
-  maxRecentMessages: 4,
+  maxRecentMessages: 6,
   maxRecentUserMessages: Infinity,
   maxRecentSizeRatio: 0.2,
   minOverflowReductionRatio: 0.05,
@@ -182,6 +182,28 @@ export class DefaultCompactionStrategy implements CompactionStrategy {
   ): Message[] {
     const template = getPruneTemplate(providerId);
     const pruned = [...messages];
+
+    // First, remove old subagent task summaries to free significant context
+    // Keep only the last 10 task summaries to preserve recent swarm session context
+    const TASK_SUMMARY_PATTERN = /^\[Task \d+ completed\]/m;
+    let taskSummaryCount = 0;
+    for (let i = pruned.length - 1; i >= 0; i--) {
+      const msg = pruned[i]!;
+      if (msg.role === 'assistant') {
+        const text = typeof msg.content === 'string'
+          ? msg.content
+          : msg.content.map(p => p.type === 'text' ? p.text : '').join('');
+        if (TASK_SUMMARY_PATTERN.test(text)) {
+          taskSummaryCount++;
+          if (taskSummaryCount > 10) {
+            // Remove this old task summary
+            pruned.splice(i, 1);
+          }
+        }
+      }
+    }
+
+    // Then prune tool results as before
     while (estimateTokensForMessages(pruned) > maxSize && pruned.length > 2) {
       const idx = pruned.findIndex(m => m.role === 'tool');
       if (idx === -1) break;

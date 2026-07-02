@@ -12,6 +12,8 @@ import { inputTotal } from '@moonshot-ai/kosong';
 import { describe, expect, it } from 'vitest';
 
 import { ErrorCodes, KimiError } from '../../src/errors';
+import { shouldTriggerCircuitBreaker } from '../../src/loop/index';
+import type { ToolCallSnapshot } from '../../src/loop/index';
 import {
   makeEndTurnResponse,
   makeMaxTokensResponse,
@@ -21,7 +23,7 @@ import {
   makeToolUseResponse,
 } from './fixtures/fake-llm';
 import { runTurn, runTurnExpectingThrow } from './fixtures/helpers';
-import { EchoTool } from './fixtures/tools';
+import { EchoTool, FailingTool } from './fixtures/tools';
 
 describe('runTurn — turn lifecycle', () => {
   it('returns end_turn after a single non-tool step', async () => {
@@ -233,5 +235,153 @@ describe('runTurn — turn lifecycle', () => {
     expect(result.usage.output).toBe(53);
     expect(result.usage.inputCacheRead).toBe(11);
     expect(result.usage.inputCacheCreation).toBe(22);
+  });
+});
+
+describe('shouldTriggerCircuitBreaker — unit', () => {
+  const snap = (overrides: Partial<ToolCallSnapshot> = {}): ToolCallSnapshot => ({
+    toolName: 'fail',
+    argsHash: '123',
+    exitCode: 1,
+    stderrHash: '456',
+    sourceUnchanged: true,
+    ...overrides,
+  });
+
+  it('returns false for fewer than 3 snapshots', () => {
+    expect(shouldTriggerCircuitBreaker([])).toBe(false);
+    expect(shouldTriggerCircuitBreaker([snap()])).toBe(false);
+    expect(shouldTriggerCircuitBreaker([snap(), snap()])).toBe(false);
+  });
+
+  it('returns true for 3 identical failing snapshots', () => {
+    expect(shouldTriggerCircuitBreaker([snap(), snap(), snap()])).toBe(true);
+  });
+
+  it('returns true when more than 3 identical snapshots accumulate', () => {
+    expect(shouldTriggerCircuitBreaker([snap(), snap(), snap(), snap()])).toBe(true);
+  });
+
+  it('returns false when args differ between calls', () => {
+    expect(shouldTriggerCircuitBreaker([
+      snap({ argsHash: 'aaa' }),
+      snap({ argsHash: 'bbb' }),
+      snap({ argsHash: 'aaa' }),
+    ])).toBe(false);
+  });
+
+  it('returns false when toolName differs', () => {
+    expect(shouldTriggerCircuitBreaker([
+      snap({ toolName: 'fail' }),
+      snap({ toolName: 'other' }),
+      snap({ toolName: 'fail' }),
+    ])).toBe(false);
+  });
+
+  it('returns false when exitCode differs', () => {
+    expect(shouldTriggerCircuitBreaker([
+      snap({ exitCode: 1 }),
+      snap({ exitCode: 0 }),
+      snap({ exitCode: 1 }),
+    ])).toBe(false);
+  });
+
+  it('returns false when stderrHash differs', () => {
+    expect(shouldTriggerCircuitBreaker([
+      snap({ stderrHash: '111' }),
+      snap({ stderrHash: '222' }),
+      snap({ stderrHash: '111' }),
+    ])).toBe(false);
+  });
+
+  it('returns false when sourceUnchanged is false (self-healing)', () => {
+    expect(shouldTriggerCircuitBreaker([
+      snap({ sourceUnchanged: false }),
+      snap({ sourceUnchanged: false }),
+      snap({ sourceUnchanged: false }),
+    ])).toBe(false);
+  });
+
+  it('returns false when only the last snapshot has sourceUnchanged=false', () => {
+    expect(shouldTriggerCircuitBreaker([
+      snap(),
+      snap(),
+      snap({ sourceUnchanged: false }),
+    ])).toBe(false);
+  });
+});
+
+describe('runTurn — circuit breaker integration', () => {
+  it('ends the turn after 3 identical failing tool calls', async () => {
+    const fail = new FailingTool('command not found');
+    const { result, llm } = await runTurn({
+      tools: [fail],
+      responses: [
+        makeToolUseResponse([makeToolCall('fail', { cmd: 'ls' }, 'tc-1')]),
+        makeToolUseResponse([makeToolCall('fail', { cmd: 'ls' }, 'tc-2')]),
+        makeToolUseResponse([makeToolCall('fail', { cmd: 'ls' }, 'tc-3')]),
+        // The 4th response should never be reached.
+        makeEndTurnResponse('should not reach'),
+      ],
+    });
+
+    expect(result.stopReason).toBe('end_turn');
+    expect(result.steps).toBe(3);
+    expect(llm.callCount).toBe(3);
+    expect(fail.calls).toHaveLength(3);
+  });
+
+  it('does not trigger when args differ between calls', async () => {
+    const fail = new FailingTool('command not found');
+    const { result, llm } = await runTurn({
+      tools: [fail],
+      maxSteps: 5,
+      responses: [
+        makeToolUseResponse([makeToolCall('fail', { cmd: 'ls' })]),
+        makeToolUseResponse([makeToolCall('fail', { cmd: 'pwd' })]),
+        makeToolUseResponse([makeToolCall('fail', { cmd: 'ls' })]),
+        makeEndTurnResponse('done'),
+      ],
+    });
+
+    expect(result.stopReason).toBe('end_turn');
+    expect(result.steps).toBe(4);
+    expect(llm.callCount).toBe(4);
+  });
+
+  it('does not trigger when a successful tool call breaks the pattern', async () => {
+    const fail = new FailingTool('command not found');
+    const echo = new EchoTool();
+    const { result, llm } = await runTurn({
+      tools: [fail, echo],
+      maxSteps: 5,
+      responses: [
+        makeToolUseResponse([makeToolCall('fail', { cmd: 'ls' })]),
+        makeToolUseResponse([makeToolCall('echo', { text: 'hi' })]),
+        makeToolUseResponse([makeToolCall('fail', { cmd: 'ls' })]),
+        makeToolUseResponse([makeToolCall('fail', { cmd: 'ls' })]),
+        makeEndTurnResponse('done'),
+      ],
+    });
+
+    expect(result.stopReason).toBe('end_turn');
+    expect(result.steps).toBe(5);
+    expect(llm.callCount).toBe(5);
+  });
+
+  it('circuit breaker does not interfere with normal tool_use→end_turn flow', async () => {
+    const echo = new EchoTool();
+    const { result, llm } = await runTurn({
+      tools: [echo],
+      responses: [
+        makeToolUseResponse([makeToolCall('echo', { text: 'hi' })]),
+        makeToolUseResponse([makeToolCall('echo', { text: 'again' })]),
+        makeEndTurnResponse('done'),
+      ],
+    });
+
+    expect(result.stopReason).toBe('end_turn');
+    expect(result.steps).toBe(3);
+    expect(llm.callCount).toBe(3);
   });
 });

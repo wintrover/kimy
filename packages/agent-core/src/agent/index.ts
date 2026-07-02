@@ -5,12 +5,14 @@ import { ErrorCodes, KimiError, makeErrorPayload } from '#/errors';
 import { log } from '#/logging/logger';
 import type { Logger } from '#/logging/types';
 import type { AgentAPI, AgentEvent, KimiConfig, SDKAgentRPC, UsageStatus } from '#/rpc';
-import { generate } from '@moonshot-ai/kosong';
+import { generate, createProvider, KimiChatProvider, type ChatProvider, type GenerationKwargs } from '@moonshot-ai/kosong';
+import { applyKimiEnvSamplingParams, applyKimiEnvThinkingKeep } from '#/config/kimi-env-params';
 
 import type { EnabledPluginSessionStart } from '#/plugin';
 
 import type { McpConnectionManager } from '../mcp';
 import { FlagResolver, type ExperimentalFlagResolver } from '../flags';
+import { persistLearnedConstraint, setRuntimeConstraintOverrides } from '#/utils/infra-overrides';
 import type { PreparedSystemPromptContext, ResolvedAgentProfile } from '../profile';
 import type { ModelProvider } from '../session/provider-manager';
 import type { SessionSubagentHost } from '../session/subagent-host';
@@ -132,6 +134,7 @@ export class Agent {
   readonly projection: ContextProjection;
 
   private additionalDirs: readonly string[];
+  private readonly _providerCache = new Map<string, ChatProvider>();
 
   constructor(options: AgentOptions) {
     this.type = options.type ?? 'main';
@@ -254,6 +257,65 @@ export class Agent {
     });
   }
 
+  /**
+   * Get or create a ChatProvider for a specific model alias.
+   * Reuses the SDK client (HTTP connection pool) across calls with the same model.
+   * Replicates the provider transforms from ConfigState.provider so the cached
+   * provider carries the same thinking, env sampling params, and profile overrides.
+   */
+  private getOrCreateProvider(modelAlias: string): ChatProvider {
+    const cached = this._providerCache.get(modelAlias);
+    if (cached) return cached;
+
+    const resolved = this.modelProvider!.resolveProviderConfig(modelAlias);
+    let provider = createProvider(resolved.provider);
+    // Only enable thinking for models that support it — matches ConfigState.provider.
+    if (resolved.modelCapabilities.thinking) {
+      provider = provider.withThinking(this.config.thinkingLevel);
+    }
+    // Apply env-level sampling params and thinking keep (matches ConfigState.provider).
+    provider = applyKimiEnvThinkingKeep(
+      applyKimiEnvSamplingParams(provider),
+      this.config.thinkingLevel,
+    );
+    // Apply profile-level sampling params (temperature / seed) inline,
+    // matching ConfigState.applyProfileSamplingParams.
+    if (provider instanceof KimiChatProvider) {
+      const { temperature, seed } = this.config.data();
+      const kwargs: GenerationKwargs = {};
+      if (temperature !== undefined) kwargs.temperature = temperature;
+      if (seed !== undefined) kwargs.extra_body = { seed };
+      if (Object.keys(kwargs).length > 0) {
+        provider = provider.withGenerationKwargs(kwargs);
+      }
+    }
+
+    this._providerCache.set(modelAlias, provider);
+    return provider;
+  }
+
+  /**
+   * Create an immutable LLM for a specific model alias.
+   * Returns a new KosongLLM shell that references a cached provider (shared connection pool).
+   * Bypasses modelAliasResolver — the caller decides the model.
+   */
+  buildLLMForModel(modelAlias: string): KosongLLM {
+    const provider = this.getOrCreateProvider(modelAlias);
+    const resolved = this.modelProvider!.resolveProviderConfig(modelAlias);
+    const loopControl = this.kimiConfig?.loopControl;
+    const completionBudgetConfig = resolveCompletionBudget({
+      maxOutputSize: resolved.maxOutputSize,
+      reservedContextSize: loopControl?.reservedContextSize,
+    });
+    return new KosongLLM({
+      provider,
+      systemPrompt: this.config.systemPrompt,
+      capability: resolved.modelCapabilities,
+      generate: this.generate,
+      completionBudgetConfig,
+    });
+  }
+
   useProfile(profile: ResolvedAgentProfile, context?: PreparedSystemPromptContext): void {
     const systemPrompt = profile.systemPrompt({
       osEnv: this.kaos.osEnv,
@@ -290,6 +352,21 @@ export class Agent {
       this.replayBuilder.postRestoring = false;
     }
     return result;
+  }
+
+  /**
+   * Learn a provider-level output limit from a runtime error and persist it.
+   *
+   * 1. Immediately updates in-memory overrides so subsequent requests cap output.
+   * 2. Writes the constraint to disk (`infra-overrides.json`) via atomicWrite
+   *    so the next session starts with the learned limit already in place.
+   */
+  async learnProviderConstraint(providerId: string, outputLimit: number): Promise<void> {
+    setRuntimeConstraintOverrides({ [providerId]: { output: outputLimit } });
+    if (this.homedir) {
+      await persistLearnedConstraint(this.homedir, providerId, outputLimit);
+    }
+    this.log.info('learned provider output constraint', { providerId, outputLimit });
   }
 
   get rpcMethods(): PromisableMethods<AgentAPI> {

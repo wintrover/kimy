@@ -20,11 +20,15 @@ import {
   userCancellationReason,
 } from '../utils/abort';
 import { collectGitContext } from './git-context';
+import { createChildLLM } from './llm-factory';
+import { ProviderCircuitBreaker } from './provider-circuit-breaker';
+import { resolveModel, createCircuitSnapshot, createRoutingSnapshot } from './model-router';
 import type { AgentContext } from '#/config/agent-context';
 import type { Session } from './index';
 import {
   SubagentBatch,
   resolveSwarmMaxConcurrency,
+  type BatchExecutionContext,
   type SubagentResult,
   type SubagentSuspendedEvent,
   type QueuedSubagentTask,
@@ -99,8 +103,13 @@ export type SubagentHandle = {
   readonly completion: Promise<SubagentCompletion>;
 };
 
+export type ProvisioningPreconditionResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: string };
+
 export class SessionSubagentHost {
   private _runtimeSubagentModel: string | null = null;
+  private readonly circuitBreaker = new ProviderCircuitBreaker();
   private readonly activeChildren = new Map<
     string,
     {
@@ -124,40 +133,70 @@ export class SessionSubagentHost {
     this._runtimeSubagentModel = model;
   }
 
-  async spawn(options: SpawnSubagentOptions): Promise<SubagentHandle> {
-    options.signal.throwIfAborted();
+  /** Record a successful provider call for circuit breaker tracking */
+  public recordProviderSuccess(providerId: string): void {
+    this.circuitBreaker.recordSuccess(providerId);
+  }
 
+  /** Record a failed provider call for circuit breaker tracking */
+  public recordProviderFailure(providerId: string): void {
+    this.circuitBreaker.recordFailure(providerId);
+  }
+
+  async spawn(options: SpawnSubagentOptions, context?: BatchExecutionContext): Promise<SubagentHandle> {
     const parent = await this.session.ensureAgentResumed(this.ownerAgentId);
+
+    // Validate ALL preconditions before creating the agent to prevent
+    // 'born dead' agents — agents created but never receiving an LLM call.
+    const precondition = await this.validateProvisioningPreconditions(
+      parent,
+      options.profileName,
+      options.signal,
+      context,
+    );
+    if (!precondition.ok) {
+      this.session.log.warn('subagent_provisioning_blocked', {
+        reason: precondition.reason,
+        profileName: options.profileName,
+      });
+      throw new Error(`Subagent provisioning blocked: ${precondition.reason}`);
+    }
+
     const profile = this.resolveProfile(parent, options.profileName);
     const { id, agent } = await this.session.createAgent(
       { type: 'sub', generate: parent.rawGenerate },
       { parentAgentId: this.ownerAgentId, swarmItem: options.swarmItem },
     );
-    const completion = this.runWithActiveChild(id, options, async (runOptions) => {
-      this.emitSubagentSpawned(parent, id, profile.name, runOptions);
-      try {
-        await this.configureChild(parent, agent, profile);
-        return await this.runPromptTurn(parent, id, agent, profile.name, runOptions);
-      } catch (error) {
-        this.emitSubagentFailed(parent, id, runOptions, error);
-        throw error;
-      }
-    });
-    return {
-      agentId: id,
-      profileName: profile.name,
-      resumed: false,
-      completion,
-    };
+    try {
+      const completion = this.runWithActiveChild(id, options, async (runOptions) => {
+        this.emitSubagentSpawned(parent, id, profile.name, runOptions);
+        try {
+          await this.configureChild(parent, agent, profile, context);
+          return await this.runPromptTurn(parent, id, agent, profile.name, runOptions, context);
+        } catch (error) {
+          this.emitSubagentFailed(parent, id, runOptions, error);
+          throw error;
+        }
+      });
+      return {
+        agentId: id,
+        profileName: profile.name,
+        resumed: false,
+        completion,
+      };
+    } catch (error) {
+      this.cleanupBornDeadAgent(id, options.profileName);
+      throw error;
+    }
   }
 
-  async resume(agentId: string, options: RunSubagentOptions): Promise<SubagentHandle> {
+  async resume(agentId: string, options: RunSubagentOptions, context?: BatchExecutionContext): Promise<SubagentHandle> {
     options.signal.throwIfAborted();
     const { parent, child, profileName } = await this.ensureIdleSubagent(agentId);
     const completion = this.runWithActiveChild(agentId, options, async (runOptions) => {
       this.emitSubagentSpawned(parent, agentId, profileName, runOptions);
       try {
-        return await this.runPromptTurn(parent, agentId, child, profileName, runOptions);
+        return await this.runPromptTurn(parent, agentId, child, profileName, runOptions, context);
       } catch (error) {
         this.emitSubagentFailed(parent, agentId, runOptions, error);
         throw error;
@@ -166,13 +205,24 @@ export class SessionSubagentHost {
     return { agentId, profileName, resumed: true, completion };
   }
 
-  async retry(agentId: string, options: RunSubagentOptions): Promise<SubagentHandle> {
+  async retry(agentId: string, options: RunSubagentOptions, context?: BatchExecutionContext): Promise<SubagentHandle> {
     options.signal.throwIfAborted();
     const { parent, child, profileName } = await this.ensureIdleSubagent(agentId);
     const completion = this.runWithActiveChild(agentId, options, async (runOptions) => {
       try {
         runOptions.signal.throwIfAborted();
         this.emitSubagentStarted(parent, agentId);
+        const { llm, selectedModel } = createChildLLM({
+          parent,
+          child,
+          circuitBreaker: this.circuitBreaker,
+          config: this.session.options.config,
+          runtimeModel: this._runtimeSubagentModel ?? undefined,
+          context,
+          log: child.log,
+        });
+        child.config.update({ modelAlias: selectedModel });
+        child.turn.setLLMForTurn(llm);
         const turnId = child.turn.retry('agent-host');
         if (turnId === null) {
           throw new Error(`Agent instance "${agentId}" could not start a retry turn`);
@@ -182,6 +232,8 @@ export class SessionSubagentHost {
       } catch (error) {
         this.emitSubagentFailed(parent, agentId, runOptions, error);
         throw error;
+      } finally {
+        child.turn.setLLMForTurn(undefined);
       }
     });
     return { agentId, profileName, resumed: true, completion };
@@ -203,15 +255,17 @@ export class SessionSubagentHost {
       throw new Error(`Agent instance "${agentId}" is already running and cannot run concurrently`);
     }
 
-    child.config.setModelAliasResolver(() => this.resolveChildModel(parent));
-
     const profileName = child.config.profileName ?? 'subagent';
     return { parent, child, profileName };
   }
 
   async runQueued<T>(tasks: readonly QueuedSubagentTask<T>[]): Promise<Array<SubagentResult<T>>> {
     const maxConcurrency = resolveSwarmMaxConcurrency();
-    return new SubagentBatch(this, tasks, { maxConcurrency }).run();
+    const config = this.session.options.config;
+    return new SubagentBatch(this, tasks, {
+      maxConcurrency,
+      fallbackModel: config?.subagentFallbackModel,
+    }).run();
   }
 
   suspended(event: SubagentSuspendedEvent): void {
@@ -293,6 +347,56 @@ export class SessionSubagentHost {
     return profile;
   }
 
+  /**
+   * Validate all preconditions before creating a subagent agent.
+   * This prevents 'born dead' agents — agents that are created but never
+   * receive an LLM call because a later step fails.
+   */
+  private async validateProvisioningPreconditions(
+    parent: Agent,
+    profileName: string,
+    signal: AbortSignal,
+    context?: BatchExecutionContext,
+  ): Promise<ProvisioningPreconditionResult> {
+    // 1. Validate profile exists
+    const profile =
+      DEFAULT_AGENT_PROFILES[parent.config.profileName ?? 'agent']?.subagents?.[profileName] ??
+      DEFAULT_AGENT_PROFILES['agent']?.subagents?.[profileName];
+    if (profile === undefined) {
+      return { ok: false, reason: `Subagent profile "${profileName}" not found` };
+    }
+
+    // 2. Ensure parent signal is still alive
+    if (signal.aborted) {
+      return { ok: false, reason: 'Parent signal already aborted' };
+    }
+
+    // 3. Validate model can be resolved (delegate to resolveChildModel
+    //    to keep all parent model alias access in one place)
+    const resolvedModel = this.resolveChildModel(parent, context);
+    if (!resolvedModel) {
+      return { ok: false, reason: 'No model configured for subagent' };
+    }
+
+    // 4. Verify SubagentStart hook is not registered (would block spawn)
+    const hookSummary = parent.hooks?.summary;
+    if (hookSummary !== undefined && (hookSummary['SubagentStart'] ?? 0) > 0) {
+      return { ok: false, reason: 'SubagentStart hook registered and may block spawn' };
+    }
+
+    return { ok: true };
+  }
+
+  /**
+   * Remove a subagent agent from the session after creation to prevent
+   * 'born dead' agents from leaking resources.
+   */
+  private cleanupBornDeadAgent(agentId: string, profileName: string): void {
+    this.session.agents.delete(agentId);
+    delete this.session.metadata.agents[agentId];
+    this.session.log.warn('subagent_born_dead_cleaned', { agentId, profileName });
+  }
+
   private runWithActiveChild(
     childId: string,
     options: RunSubagentOptions,
@@ -317,6 +421,7 @@ export class SessionSubagentHost {
     child: Agent,
     profileName: string,
     options: RunSubagentOptions,
+    context?: BatchExecutionContext,
   ): Promise<SubagentCompletion> {
     options.signal.throwIfAborted();
     await this.triggerSubagentStart(parent, profileName, options.prompt, options.signal);
@@ -328,13 +433,28 @@ export class SessionSubagentHost {
       if (gitContext) childPrompt = `${gitContext}\n\n${childPrompt}`;
     }
 
+    const { llm, selectedModel } = createChildLLM({
+      parent,
+      child,
+      circuitBreaker: this.circuitBreaker,
+      config: this.session.options.config,
+      runtimeModel: this._runtimeSubagentModel ?? undefined,
+      context,
+      log: child.log,
+    });
+    child.config.update({ modelAlias: selectedModel });
+    child.turn.setLLMForTurn(llm);
     this.emitSubagentStarted(parent, childId);
     const turnId = child.turn.prompt([{ type: 'text', text: childPrompt }], SUBAGENT_PROMPT_ORIGIN);
     if (turnId === null) {
       throw new Error(`Agent instance "${childId}" could not start a turn`);
     }
     this.observeFirstRequest(child, options);
-    return this.waitForChildCompletion(parent, childId, child, profileName, options);
+    try {
+      return await this.waitForChildCompletion(parent, childId, child, profileName, options);
+    } finally {
+      child.turn.setLLMForTurn(undefined);
+    }
   }
 
   private async waitForChildCompletion(
@@ -381,28 +501,56 @@ export class SessionSubagentHost {
 
   /**
    * Single source of truth for the model a subagent should use.
-   * 3-tier fallback: subagent-specific → parent's model → global default.
-   * Every lifecycle method MUST call this instead of reading parent.config
-   * directly, so future entry points get the correct model automatically.
+   * Uses the pure model-router function with circuit breaker awareness
+   * for deterministic, verifiable routing decisions.
    */
-  private resolveChildModel(parent: Agent): string {
+  private resolveChildModel(parent: Agent, context?: BatchExecutionContext, child?: Agent): string {
     const config = this.session.options.config;
-    return (
-      this._runtimeSubagentModel ??   // Tier 0: runtime override
-      config?.subagentModel ??        // Tier 1: config file
-      parent.config.modelAlias ??     // Tier 2: parent's model
-      config?.defaultModel ??         // Tier 3: global default
-      ''
-    );
+
+    // Build a dynamic model→provider map from the child's ModelProvider
+    const dynamicProviderMap = new Map<string, string>();
+    if (child?.modelProvider) {
+      const candidateModels = [
+        this._runtimeSubagentModel,
+        config?.subagentModel,
+        parent.config.modelAlias,
+        config?.defaultModel,
+        config?.subagentFallbackModel,
+      ].filter((m): m is string => !!m);
+      for (const model of new Set(candidateModels)) {
+        try {
+          const { providerName } = child.modelProvider.resolveProviderConfig(model);
+          dynamicProviderMap.set(model, providerName);
+        } catch {
+          // unregistered model — skip
+        }
+      }
+    }
+
+    // Build snapshot for deterministic routing
+    const snapshot = createRoutingSnapshot({
+      isRateLimited: context?.isRateLimited ?? false,
+      runtimeModel: this._runtimeSubagentModel ?? undefined,
+      configSubagentModel: config?.subagentModel ?? undefined,
+      parentModel: parent.config.modelAlias ?? undefined,
+      defaultModel: config?.defaultModel ?? undefined,
+      fallbackPriority: config?.subagentFallbackModel
+        ? [config.subagentFallbackModel]
+        : undefined,
+      circuitStates: createCircuitSnapshot(this.circuitBreaker),
+      modelProviderMap: dynamicProviderMap,
+    });
+
+    const output = resolveModel(snapshot);
+    return output.selectedModel;
   }
 
   private async configureChild(
     parent: Agent,
     child: Agent,
     profile: ResolvedAgentProfile,
+    context?: BatchExecutionContext,
   ): Promise<void> {
-    // A subagent always inherits the parent agent's model.
-    child.config.setModelAliasResolver(() => this.resolveChildModel(parent));
     child.config.update({
       cwd: parent.config.cwd,
       thinkingLevel: parent.config.thinkingLevel,
@@ -410,12 +558,12 @@ export class SessionSubagentHost {
       seed: profile.seed,
     });
 
-    const context = await prepareSystemPromptContext(
+    const promptContext = await prepareSystemPromptContext(
       this.session.systemContextKaos(child.kaos.getcwd()),
       this.session.options.kimiHomeDir,
       { additionalDirs: child.getAdditionalDirs(), agentType: child.type },
     );
-    child.useProfile(profile, context);
+    child.useProfile(profile, promptContext);
     child.tools.inheritUserTools(parent.tools);
 
     // Sub-agents must not have access to orchestration tools (e.g. AgentSwarm)

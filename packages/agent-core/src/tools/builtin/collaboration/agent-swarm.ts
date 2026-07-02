@@ -1,7 +1,10 @@
+import { createHash } from 'node:crypto';
+
 import { z } from 'zod';
 
 import type { SwarmMode } from '../../../agent/swarm';
 import type { BuiltinTool } from '../../../agent/tool';
+import { log } from '../../../logging/logger';
 import {
   DEFAULT_SUBAGENT_TIMEOUT_MS,
   type QueuedSubagentTask,
@@ -78,7 +81,7 @@ type AgentSwarmSpec = AgentSwarmSpawnSpec | AgentSwarmResumeSpec;
 interface SwarmRunResult {
   readonly spec: AgentSwarmSpec;
   readonly agentId?: string;
-  readonly status: 'completed' | 'failed' | 'aborted';
+  readonly status: 'completed' | 'failed' | 'aborted' | 'interrupted';
   readonly state?: 'started' | 'not_started';
   readonly result?: string;
   readonly error?: string;
@@ -163,7 +166,28 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
       };
     });
     const results = await this.subagentHost.runQueued(tasks);
-    return renderSwarmResults(results.map(({ task, ...result }) => ({ spec: task.data, ...result })));
+    const runResults: SwarmRunResult[] = results.map(({ task, ...result }) => ({
+      spec: task.data,
+      ...result,
+    }));
+
+    const errorTracker = new ErrorHashTracker();
+    const deduplicatedResults = runResults.map((result) => {
+      if (result.error !== undefined) {
+        const normalized = normalizeErrorMessage(result.error);
+        if (errorTracker.record(normalized)) {
+          const errorHash = createHash('sha256').update(normalized).digest('hex').slice(0, 16);
+          log.warn('swarm_duplicate_error_blocked', { item: result.spec.item, errorHash });
+          return {
+            ...result,
+            error: `[BLOCKED: duplicate error pattern] ${result.error}`,
+          };
+        }
+      }
+      return result;
+    });
+
+    return renderSwarmResults(deduplicatedResults);
   }
 }
 
@@ -238,14 +262,15 @@ function childDescription(swarmDescription: string, index: number, profileName: 
 
 function renderSwarmResults(results: readonly SwarmRunResult[]): string {
   const completed = results.filter((result) => result.status === 'completed').length;
-  const failed = results.filter((result) => result.status === 'failed').length;
+  const failed = results.filter((result) => result.status === 'failed' || result.status === 'interrupted').length;
   const aborted = results.filter((result) => result.status === 'aborted').length;
+  const interrupted = results.filter((result) => result.status === 'interrupted').length;
   const shouldRenderResumeHint =
     results.some((result) => result.status !== 'completed') &&
     results.some((result) => result.agentId !== undefined);
   const lines = [
     '<agent_swarm_result>',
-    `<summary>${renderSwarmSummary(completed, failed, aborted)}</summary>`,
+    `<summary>${renderSwarmSummary(completed, failed, aborted, interrupted)}</summary>`,
   ];
 
   if (shouldRenderResumeHint) {
@@ -275,11 +300,12 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function renderSwarmSummary(completed: number, failed: number, aborted = 0): string {
+function renderSwarmSummary(completed: number, failed: number, aborted = 0, interrupted = 0): string {
   const parts: string[] = [];
   if (completed > 0) parts.push(`completed: ${String(completed)}`);
   if (failed > 0) parts.push(`failed: ${String(failed)}`);
   if (aborted > 0) parts.push(`aborted: ${String(aborted)}`);
+  if (interrupted > 0) parts.push(`interrupted: ${String(interrupted)}`);
   return parts.join(', ');
 }
 
@@ -289,4 +315,34 @@ function escapeXmlAttribute(value: string): string {
     .replaceAll('"', '&quot;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;');
+}
+
+function normalizeErrorMessage(raw: string): string {
+  return raw
+    .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z?/g, '<TIMESTAMP>')
+    .replace(/\/tmp\/[a-zA-Z0-9_-]+/g, '<TMP_PATH>')
+    .replace(/\/var\/folders\/[^\s]+/g, '<TMP_PATH>')
+    .replace(/pid[=:]?\s*\d+/gi, 'pid=<PID>')
+    .replace(/0x[0-9a-fA-F]+/g, '<HEX>')
+    .replace(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g, '<IP>')
+    .replace(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/gi, '<UUID>')
+    .replace(/line \d+/gi, 'line <N>')
+    .replace(/:\d+:\d+/g, ':<LINE>:<COL>')
+    .trim();
+}
+
+class ErrorHashTracker {
+  private hashes = new Map<string, number>();
+
+  record(normalizedError: string): boolean {
+    const hash = createHash('sha256').update(normalizedError).digest('hex').slice(0, 16);
+    const count = (this.hashes.get(hash) ?? 0) + 1;
+    this.hashes.set(hash, count);
+    return count >= 2;
+  }
+
+  isDuplicate(normalizedError: string): boolean {
+    const hash = createHash('sha256').update(normalizedError).digest('hex').slice(0, 16);
+    return (this.hashes.get(hash) ?? 0) >= 2;
+  }
 }

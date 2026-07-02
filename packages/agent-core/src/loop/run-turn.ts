@@ -19,6 +19,7 @@ import {
 import type { LoopInterruptReason, LoopEventDispatcher, LoopTurnInterruptedEvent } from './events';
 import type { LLM } from './llm';
 import { executeLoopStep } from './turn-step';
+import type { ToolCallSnapshot } from './tool-call';
 import type {
   ExecutableTool,
   LoopHooks,
@@ -45,6 +46,23 @@ export interface RunTurnInput {
     | undefined;
 }
 
+/**
+ * Detects when the same tool call fails identically 3+ times in a row
+ * with no source file changes. Blocks only truly stuck failures while
+ * preserving self-healing loops (where the model modifies code between retries).
+ */
+export function shouldTriggerCircuitBreaker(recent: readonly ToolCallSnapshot[]): boolean {
+  if (recent.length < 3) return false;
+  const last3 = recent.slice(-3);
+  return last3.every(s =>
+    s.toolName === last3[0]!.toolName &&
+    s.argsHash === last3[0]!.argsHash &&
+    s.exitCode === last3[0]!.exitCode &&
+    s.stderrHash === last3[0]!.stderrHash &&
+    s.sourceUnchanged
+  );
+}
+
 export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
   const {
     turnId,
@@ -64,6 +82,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
   // Normal exits overwrite this with the completed step's stop reason.
   let stopReason: LoopTurnStopReason = 'end_turn';
   let activeStep: number | undefined;
+  const recentSnapshots: ToolCallSnapshot[] = [];
   const recordStepUsage = async (
     stepUsage: TokenUsage,
   ): Promise<RecordStepUsageResult | void> => {
@@ -96,7 +115,15 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
       });
       activeStep = undefined;
 
+      if (stepResult.toolCallSnapshots !== undefined) {
+        recentSnapshots.push(...stepResult.toolCallSnapshots);
+      }
+
       if (stepResult.stopReason === 'tool_use') {
+        if (shouldTriggerCircuitBreaker(recentSnapshots)) {
+          stopReason = 'end_turn';
+          break;
+        }
         continue;
       }
 

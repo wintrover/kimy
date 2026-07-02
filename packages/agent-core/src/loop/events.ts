@@ -3,7 +3,7 @@ import type { FinishReason, TextPart, ThinkPart, TokenUsage } from '@moonshot-ai
 import type { ToolInputDisplay } from '../tools/display';
 import type { ExecutableToolResult, LoopStepStopReason, ToolUpdate } from './types';
 
-export type LoopInterruptReason = 'aborted' | 'max_steps' | 'error';
+export type LoopInterruptReason = 'aborted' | 'max_steps' | 'circuit_breaker' | 'error';
 
 export interface LoopStepBeginEvent {
   readonly type: 'step.begin';

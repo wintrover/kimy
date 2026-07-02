@@ -459,6 +459,9 @@ describe('SessionSubagentHost', () => {
         agents: new Map([['main', parent.agent]]),
         ensureAgentResumed: vi.fn(async () => parent.agent),
         createAgent,
+        log: { warn: vi.fn() },
+        options: { config: undefined },
+        metadata: { agents: {} },
       } as never,
       'main',
     );
@@ -472,7 +475,7 @@ describe('SessionSubagentHost', () => {
         runInBackground: false,
         signal,
       }),
-    ).rejects.toThrow('Subagent profile "missing" was not found');
+    ).rejects.toThrow('Subagent profile "missing" not found');
     expect(createAgent).not.toHaveBeenCalled();
   });
 
@@ -485,6 +488,9 @@ describe('SessionSubagentHost', () => {
         agents: new Map([['main', parent.agent]]),
         ensureAgentResumed: vi.fn(async () => parent.agent),
         createAgent,
+        log: { warn: vi.fn() },
+        options: { config: undefined },
+        metadata: { agents: {} },
       } as never,
       'main',
     );
@@ -498,7 +504,103 @@ describe('SessionSubagentHost', () => {
         runInBackground: false,
         signal,
       }),
-    ).rejects.toThrow('Subagent profile "btw" was not found');
+    ).rejects.toThrow('Subagent profile "btw" not found');
+    expect(createAgent).not.toHaveBeenCalled();
+  });
+
+  it('rejects spawn when parent signal is already aborted', async () => {
+    const parent = testAgent();
+    parent.configure();
+    const createAgent = vi.fn();
+    const host = new SessionSubagentHost(
+      {
+        agents: new Map([['main', parent.agent]]),
+        ensureAgentResumed: vi.fn(async () => parent.agent),
+        createAgent,
+        log: { warn: vi.fn() },
+        options: { config: undefined },
+        metadata: { agents: {} },
+      } as never,
+      'main',
+    );
+
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      host.spawn({
+        profileName: 'coder',
+        parentToolCallId: 'call_agent',
+        prompt: 'Test',
+        description: 'Test',
+        runInBackground: false,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow('Parent signal already aborted');
+    expect(createAgent).not.toHaveBeenCalled();
+  });
+
+  it('rejects spawn when no model is configured', async () => {
+    // Create a parent with no modelAlias and no config models so
+    // resolveModel returns empty selectedModel.
+    const parent = testAgent();
+    parent.agent.config.update({ modelAlias: '' });
+    const createAgent = vi.fn();
+    const host = new SessionSubagentHost(
+      {
+        agents: new Map([['main', parent.agent]]),
+        ensureAgentResumed: vi.fn(async () => parent.agent),
+        createAgent,
+        log: { warn: vi.fn() },
+        options: { config: undefined },
+        metadata: { agents: {} },
+      } as never,
+      'main',
+    );
+
+    await expect(
+      host.spawn({
+        profileName: 'coder',
+        parentToolCallId: 'call_agent',
+        prompt: 'Test',
+        description: 'Test',
+        runInBackground: false,
+        signal,
+      }),
+    ).rejects.toThrow('No model configured for subagent');
+    expect(createAgent).not.toHaveBeenCalled();
+  });
+
+  it('rejects spawn when SubagentStart hook is registered', async () => {
+    const parent = testAgent();
+    parent.configure();
+    const createAgent = vi.fn();
+    // Mock hooks.summary to report a registered SubagentStart hook
+    const mockHooks = { summary: { SubagentStart: 1 } };
+    const parentWithHooks = Object.create(parent.agent);
+    Object.defineProperty(parentWithHooks, 'hooks', { value: mockHooks, writable: false });
+    const host = new SessionSubagentHost(
+      {
+        agents: new Map([['main', parentWithHooks as Agent]]),
+        ensureAgentResumed: vi.fn(async () => parentWithHooks as Agent),
+        createAgent,
+        log: { warn: vi.fn() },
+        options: { config: undefined },
+        metadata: { agents: {} },
+      } as never,
+      'main',
+    );
+
+    await expect(
+      host.spawn({
+        profileName: 'coder',
+        parentToolCallId: 'call_agent',
+        prompt: 'Test',
+        description: 'Test',
+        runInBackground: false,
+        signal,
+      }),
+    ).rejects.toThrow('SubagentStart hook registered');
     expect(createAgent).not.toHaveBeenCalled();
   });
 
@@ -1216,6 +1318,53 @@ describe('subagent model resolution', () => {
       }
     }
     expect(violations).toEqual([]);
+  });
+
+  it('subagent-host source no longer contains static modelProviderMap field or registerModelProvider method', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('pathe');
+    const source = readFileSync(
+      join(__dirname, '../../src/session/subagent-host.ts'),
+      'utf-8',
+    );
+    // The old dead-code static field and method must be removed.
+    // (The string "modelProviderMap" may still appear as a parameter key in
+    // createRoutingSnapshot calls — only the field declaration is forbidden.)
+    expect(source).not.toContain('private readonly modelProviderMap');
+    expect(source).not.toContain('public registerModelProvider');
+    expect(source).not.toContain('this.modelProviderMap');
+  });
+
+  it('resolveChildModel builds dynamic provider map from child.modelProvider', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.newEvents();
+
+    const child = testAgent();
+    const summary =
+      'Completed the delegated task with enough detail for the parent agent to continue confidently without repeating any of the child agent work. '.repeat(
+        2,
+      );
+    child.mockNextResponse({ type: 'text', text: summary });
+
+    // Use a config with subagentModel so the dynamic map has a non-trivial candidate
+    const session = fakeSession(parent.agent, child.agent, {}, { subagentModel: 'mock-model' });
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn({
+      profileName: 'coder',
+      parentToolCallId: 'call_agent',
+      prompt: 'Do the task',
+      description: 'Task',
+      runInBackground: false,
+      signal,
+    });
+    await handle.completion;
+
+    // After spawn, the child's model should be resolved through the dynamic
+    // provider map (built from child.modelProvider). Since the test harness
+    // registers 'mock-model' as 'test-provider', the resolver should pick it.
+    expect(child.agent.config.modelAlias).toBe('mock-model');
   });
 });
 

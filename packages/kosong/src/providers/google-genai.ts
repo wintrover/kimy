@@ -79,6 +79,8 @@ export interface GoogleGenAIOptions {
   location?: string | undefined;
   stream?: boolean | undefined;
   clientFactory?: (auth: ProviderRequestAuth) => GenAIClient;
+  /** Provider-level infra ceiling for output tokens (safety net for unknown models). */
+  defaultMaxTokens?: number | undefined;
 }
 
 export interface GoogleGenAIGenerationKwargs {
@@ -674,6 +676,7 @@ export class GoogleGenAIChatProvider implements ChatProvider {
   private _project: string | undefined;
   private _location: string | undefined;
   private _clientFactory: ((auth: ProviderRequestAuth) => GenAIClient) | undefined;
+  private _defaultMaxTokens: number | undefined;
 
   constructor(options: GoogleGenAIOptions) {
     this._model = options.model;
@@ -686,6 +689,7 @@ export class GoogleGenAIChatProvider implements ChatProvider {
     this._project = options.project;
     this._location = options.location;
     this._clientFactory = options.clientFactory;
+    this._defaultMaxTokens = options.defaultMaxTokens;
     this._client =
       this._vertexai || this._apiKey !== undefined ? this._buildClient(this._apiKey) : undefined;
   }

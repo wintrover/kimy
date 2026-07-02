@@ -85,6 +85,7 @@ describe('catalogModelToCapability', () => {
       id: 'm',
       name: 'M',
       maxOutputSize: 64000,
+      reasoningKey: undefined,
       capability: {
         image_in: true,
         video_in: false,
@@ -92,6 +93,7 @@ describe('catalogModelToCapability', () => {
         thinking: true,
         tool_use: true,
         max_context_tokens: 200000,
+        max_output_tokens: 64000,
       },
     });
   });

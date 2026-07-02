@@ -40,7 +40,7 @@ import bashDescriptionTemplate from './bash.md?raw';
 
 const MS_PER_SECOND = 1000;
 const DEFAULT_TIMEOUT_S = 60;
-const MAX_TIMEOUT_S = 5 * 60;
+const MAX_TIMEOUT_S = 10 * 60;
 const DEFAULT_BACKGROUND_TIMEOUT_S = 10 * 60;
 const MAX_BACKGROUND_TIMEOUT_S = 24 * 60 * 60;
 const USER_INTERRUPT_REASON = 'Interrupted by user';

@@ -19,6 +19,20 @@ export function isMaxStepsExceededError(error: unknown): boolean {
   return isKimiError(error) && error.code === ErrorCodes.LOOP_MAX_STEPS_EXCEEDED;
 }
 
+export function createCircuitBreakerError(toolName: string, consecutiveFailures: number): KimiError {
+  return new KimiError(
+    ErrorCodes.LOOP_CIRCUIT_BREAKER,
+    `Circuit breaker triggered: "${toolName}" failed identically ${String(consecutiveFailures)} times in a row with no source changes.`,
+    {
+      details: { toolName, consecutiveFailures },
+    },
+  );
+}
+
+export function isCircuitBreakerError(error: unknown): boolean {
+  return isKimiError(error) && error.code === ErrorCodes.LOOP_CIRCUIT_BREAKER;
+}
+
 export function isAbortError(err: unknown): boolean {
   if (err instanceof Error) {
     return err.name === 'AbortError';

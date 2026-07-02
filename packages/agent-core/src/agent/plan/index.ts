@@ -196,6 +196,10 @@ export class PlanMode {
     return this._planFilePath;
   }
 
+  get plansDir(): string {
+    return this.getPlansDir();
+  }
+
   async data(): Promise<PlanData> {
     if (!this._planId || !this._planFilePath) return null;
     let content = '';

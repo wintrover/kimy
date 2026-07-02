@@ -273,9 +273,10 @@ describe('BashTool', () => {
     expect(BashInputSchema.safeParse({ command: '' }).success).toBe(false);
     expect(BashInputSchema.safeParse({ command: 'echo x', timeout: 0 }).success).toBe(false);
     expect(BashInputSchema.safeParse({ command: 'echo x', timeout: 300 }).success).toBe(true);
-    expect(BashInputSchema.safeParse({ command: 'echo x', timeout: 301 }).success).toBe(false);
-    expect(BashInputSchema.safeParse({ command: 'echo x', timeout: 300_000 }).success).toBe(false);
-    expect(BashInputSchema.safeParse({ command: 'echo x', timeout: 300_001 }).success).toBe(false);
+    expect(BashInputSchema.safeParse({ command: 'echo x', timeout: 600 }).success).toBe(true);
+    expect(BashInputSchema.safeParse({ command: 'echo x', timeout: 601 }).success).toBe(false);
+    expect(BashInputSchema.safeParse({ command: 'echo x', timeout: 600_000 }).success).toBe(false);
+    expect(BashInputSchema.safeParse({ command: 'echo x', timeout: 600_001 }).success).toBe(false);
     expect(
       BashInputSchema.safeParse({
         command: 'watch',

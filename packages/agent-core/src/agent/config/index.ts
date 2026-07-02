@@ -130,7 +130,15 @@ export class ConfigState {
     //   - withThinking: preserve thinking during compaction (#464)
     //   - sampling params: KIMI_MODEL_TEMPERATURE / KIMI_MODEL_TOP_P
     //   - thinking.keep: KIMI_MODEL_THINKING_KEEP (only while thinking is on)
-    const provider = createProvider(this.providerConfig).withThinking(this.thinkingLevel);
+    let provider = createProvider(this.providerConfig);
+    // Only enable thinking for models that support it. Models with
+    // thinking: false (e.g. minimax-m3) must not receive reasoning_effort
+    // parameters, which would cause 400 errors from their API.
+    // UNKNOWN_CAPABILITY defaults thinking to false, so unknown models
+    // are also safely excluded.
+    if (this.modelCapabilities.thinking) {
+      provider = provider.withThinking(this.thinkingLevel);
+    }
     const withEnv = applyKimiEnvThinkingKeep(applyKimiEnvSamplingParams(provider), this.thinkingLevel);
     return this.applyProfileSamplingParams(withEnv);
   }

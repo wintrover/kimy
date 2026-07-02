@@ -48,6 +48,7 @@ export interface ExecuteLoopStepResult {
   readonly stopReason: LoopStepStopReason;
   /** True when the step ended due to a virtual-turn batch interception. */
   readonly virtualTurn?: boolean | undefined;
+  readonly toolCallSnapshots?: readonly import('./tool-call').ToolCallSnapshot[] | undefined;
 }
 
 export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<ExecuteLoopStepResult> {
@@ -136,10 +137,12 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<Execut
   let effectiveStopReason: LoopStepStopReason =
     stopTurnAfterUsage && stopReason === 'tool_use' ? 'end_turn' : stopReason;
   let virtualTurn: boolean | undefined;
+  let toolCallSnapshots: readonly import('./tool-call').ToolCallSnapshot[] | undefined;
   if (effectiveStopReason === 'tool_use') {
     const toolBatch = await runToolCallBatch(step, response);
     if (toolBatch.stopTurn) effectiveStopReason = 'end_turn';
     virtualTurn = toolBatch.virtualTurn;
+    toolCallSnapshots = toolBatch.snapshots;
   }
 
   // When a tool batch runs, it drains paired `tool.result` events even when
@@ -180,6 +183,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<Execut
     stopReason:
       stopTurnAfterStep && effectiveStopReason === 'tool_use' ? 'end_turn' : effectiveStopReason,
     virtualTurn,
+    toolCallSnapshots,
   };
 }
 

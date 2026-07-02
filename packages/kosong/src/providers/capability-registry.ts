@@ -59,6 +59,7 @@ const OPENAI_REASONING_CAPABILITY: ModelCapability = Object.freeze({
   thinking: true,
   tool_use: true,
   max_context_tokens: 0,
+  max_output_tokens: 100_000,
 });
 
 const OPENAI_VISION_TOOL_CAPABILITY: ModelCapability = Object.freeze({
@@ -68,6 +69,17 @@ const OPENAI_VISION_TOOL_CAPABILITY: ModelCapability = Object.freeze({
   thinking: false,
   tool_use: true,
   max_context_tokens: 0,
+  max_output_tokens: 16_384,
+});
+
+const OPENAI_GPT4TURBO_CAPABILITY: ModelCapability = Object.freeze({
+  image_in: true,
+  video_in: false,
+  audio_in: false,
+  thinking: false,
+  tool_use: true,
+  max_context_tokens: 0,
+  max_output_tokens: 4_096,
 });
 
 const OPENAI_TEXT_TOOL_CAPABILITY: ModelCapability = Object.freeze({
@@ -77,6 +89,7 @@ const OPENAI_TEXT_TOOL_CAPABILITY: ModelCapability = Object.freeze({
   thinking: false,
   tool_use: true,
   max_context_tokens: 0,
+  max_output_tokens: 0,
 });
 
 const ANTHROPIC_VISION_TOOL_CAPABILITY: ModelCapability = Object.freeze({
@@ -86,6 +99,7 @@ const ANTHROPIC_VISION_TOOL_CAPABILITY: ModelCapability = Object.freeze({
   thinking: false,
   tool_use: true,
   max_context_tokens: 0,
+  max_output_tokens: 0,
 });
 
 const ANTHROPIC_THINKING_VISION_TOOL_CAPABILITY: ModelCapability = Object.freeze({
@@ -95,6 +109,7 @@ const ANTHROPIC_THINKING_VISION_TOOL_CAPABILITY: ModelCapability = Object.freeze
   thinking: true,
   tool_use: true,
   max_context_tokens: 0,
+  max_output_tokens: 64_000,
 });
 
 const GEMINI_MULTIMODAL_TOOL_CAPABILITY: ModelCapability = Object.freeze({
@@ -104,6 +119,7 @@ const GEMINI_MULTIMODAL_TOOL_CAPABILITY: ModelCapability = Object.freeze({
   thinking: false,
   tool_use: true,
   max_context_tokens: 0,
+  max_output_tokens: 0,
 });
 
 const GEMINI_THINKING_MULTIMODAL_TOOL_CAPABILITY: ModelCapability = Object.freeze({
@@ -113,12 +129,17 @@ const GEMINI_THINKING_MULTIMODAL_TOOL_CAPABILITY: ModelCapability = Object.freez
   thinking: true,
   tool_use: true,
   max_context_tokens: 0,
+  max_output_tokens: 65_536,
 });
 
 const OPENAI_LEGACY_CAPABILITY_CATALOG: readonly CapabilityCatalogEntry[] = [
   {
     matches: isOpenAIReasoningModel,
     capability: OPENAI_REASONING_CAPABILITY,
+  },
+  {
+    matches: (name) => name.startsWith('gpt-4-turbo'),
+    capability: OPENAI_GPT4TURBO_CAPABILITY,
   },
   {
     matches: (name) => hasPrefix(name, OPENAI_VISION_TOOL_PREFIXES),
@@ -134,6 +155,10 @@ const OPENAI_RESPONSES_CAPABILITY_CATALOG: readonly CapabilityCatalogEntry[] = [
   {
     matches: isOpenAIReasoningModel,
     capability: OPENAI_REASONING_CAPABILITY,
+  },
+  {
+    matches: (name) => name.startsWith('gpt-4-turbo'),
+    capability: OPENAI_GPT4TURBO_CAPABILITY,
   },
   {
     matches: (name) => hasPrefix(name, OPENAI_VISION_TOOL_PREFIXES),

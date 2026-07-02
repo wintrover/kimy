@@ -1,0 +1,1 @@
+Save the content of the current plan file. This tool can ONLY be used when plan mode is active (after calling EnterPlanMode). The content is written to the plan file path determined by the plan mode system. Use this tool to create or update the plan with your implementation analysis and proposed changes.

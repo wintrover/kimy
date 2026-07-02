@@ -22,6 +22,9 @@ async function activePlanAgent(): Promise<{ agent: Agent; planMode: PlanMode }> 
     replayBuilder: { push: vi.fn() },
     kaos: {
       mkdir: vi.fn().mockResolvedValue(undefined),
+      iterdir: vi.fn().mockReturnValue((async function* () {})()),
+      stat: vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
+      writeText: vi.fn().mockResolvedValue(undefined),
     },
   } as unknown as Agent;
   const planMode = new PlanMode(agent);

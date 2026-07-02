@@ -178,7 +178,7 @@ export class FullCompaction {
   }
 
   async beforeStep(signal: AbortSignal): Promise<void> {
-    const compactionRatio = this.agent.kimiConfig?.loopControl?.preemptiveCompactionRatio ?? 0.7;
+    const compactionRatio = this.agent.kimiConfig?.loopControl?.preemptiveCompactionRatio ?? 0.6;
     const maxTokens = this.agent.config.modelCapabilities.max_context_tokens ?? Infinity;
     const curTokens = this.agent.context.tokenCount;
     if (maxTokens > 0 && maxTokens !== Infinity && curTokens / maxTokens > compactionRatio && !this.compacting && !this.pendingCompaction && this.strategy.shouldCompact(curTokens)) {
@@ -215,7 +215,14 @@ export class FullCompaction {
       }
       return false;
     }
-    this.begin({ source: 'auto', instruction: undefined });
+    try {
+      this.begin({ source: 'auto', instruction: undefined });
+    } catch (error) {
+      if (isKimiError(error) && error.code === ErrorCodes.COMPACTION_UNABLE) {
+        return false;
+      }
+      throw error;
+    }
     return this.compacting !== null;
   }
 
@@ -268,7 +275,30 @@ export class FullCompaction {
       await this.agent.injection.injectGoal();
       this.triggerPostCompactHook(data, finalResult);
     } catch (error) {
-      if (isAbortError(error)) return;
+      if (isAbortError(error)) {
+        // Trigger hard prune immediately on abort to prevent bloated context
+        const blockedByTurn = this.compacting?.blockedByTurn === true;
+        this.cancel();
+        const maxTokens = this.agent.config.modelCapabilities.max_context_tokens ?? Infinity;
+        if (maxTokens !== Infinity) {
+          const providerId = this.agent.config.provider.name;
+          const original = this.agent.context.history;
+          const tokensBefore = estimateTokensForMessages(original);
+          const pruned = this.strategy.hardPrune(
+            original,
+            maxTokens,
+            providerId,
+          );
+          if (pruned.length !== original.length || pruned.some((m, i) => m !== original[i])) {
+            this.agent.log.warn('compaction_hard_prune_triggered', { reason: 'abort', tokensBefore });
+            this.agent.context.replaceHistory(pruned);
+          }
+        }
+        if (blockedByTurn) {
+          throw error;
+        }
+        return;
+      }
       const blockedByTurn = this.compacting?.blockedByTurn === true;
       this.cancel();
       this.agent.log.error('compaction failed', { error });
@@ -276,12 +306,14 @@ export class FullCompaction {
       if (maxTokens !== Infinity) {
         const providerId = this.agent.config.provider.name;
         const original = this.agent.context.history;
+        const tokensBefore = estimateTokensForMessages(original);
         const pruned = this.strategy.hardPrune(
           original,
           maxTokens,
           providerId,
         );
         if (pruned.length !== original.length || pruned.some((m, i) => m !== original[i])) {
+          this.agent.log.warn('compaction_hard_prune_triggered', { reason: 'compaction_failed', tokensBefore });
           this.agent.context.replaceHistory(pruned);
         }
       }
@@ -357,7 +389,10 @@ export class FullCompaction {
           if (retryCount + 1 >= MAX_COMPACTION_RETRY_ATTEMPTS) {
             throw error;
           }
-          await sleepForRetry(delays[retryCount]!, signal);
+          const jitter = Math.random() * 1000; // 0-1s random jitter to avoid thundering herd
+          const baseDelay = delays[retryCount]!;
+          const delay = Math.min(baseDelay + jitter, 30000);
+          await sleepForRetry(delay, signal);
           retryCount += 1;
         }
       }

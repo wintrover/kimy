@@ -421,6 +421,7 @@ export class ToolManager {
           new b.ReadMediaFileTool(kaos, workspace, modelCapabilities, videoUploader),
         new b.EnterPlanModeTool(this.agent),
         new b.ExitPlanModeTool(this.agent),
+        new b.SavePlanTool(this.agent),
         // Goal tools are main-agent-only.
         goalToolsEnabled && new b.CreateGoalTool(this.agent),
         goalToolsEnabled && new b.GetGoalTool(this.agent),

@@ -44,7 +44,7 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
     try {
       return await input.llm.chat(paramsForAttempt(input, attempt, maxAttempts));
     } catch (error) {
-      if (attempt >= maxAttempts || !input.llm.isRetryableError(error)) {
+      if (attempt >= maxAttempts || !input.llm.isRetryableError?.(error)) {
         logRequestFailure(input, error, attempt, maxAttempts);
         throw error;
       }

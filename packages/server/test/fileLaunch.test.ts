@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   openFileCommandFor,
   openInAppCommandFor,
@@ -37,7 +37,27 @@ describe('file launch commands', () => {
   });
 });
 
+const EDITOR_ENV_KEYS = ['EDITOR', 'VISUAL', 'KIMI_CODE_EDITOR'] as const;
+let savedEditorEnv: Record<string, string | undefined>;
+
 describe('open-in-app launch commands', () => {
+  beforeEach(() => {
+    savedEditorEnv = {};
+    for (const key of EDITOR_ENV_KEYS) {
+      savedEditorEnv[key] = process.env[key];
+      delete process.env[key];
+    }
+  });
+
+  afterEach(() => {
+    for (const key of EDITOR_ENV_KEYS) {
+      if (savedEditorEnv[key] === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = savedEditorEnv[key];
+      }
+    }
+  });
   it('opens vscode with line targets', () => {
     expect(openInAppCommandFor('vscode', '/repo/src/App.vue', { line: 12 }, 'darwin')).toEqual({
       command: "code -g '/repo/src/App.vue:12'",

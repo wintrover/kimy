@@ -42,7 +42,7 @@ export class ExitPlanModeReviewAskPermissionPolicy extends BasePermissionPolicy 
     };
   }
 
-  onSelected(context: PermissionPolicyContext, result: PermissionPolicyResult): void {
+  override onSelected(context: PermissionPolicyContext, result: PermissionPolicyResult): void {
     if (context.toolCall.name !== 'ExitPlanMode') return;
     const display = context.execution.display;
     if (display?.kind !== 'plan_review') return;

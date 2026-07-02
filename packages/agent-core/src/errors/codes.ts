@@ -48,6 +48,7 @@ export const ErrorCodes = {
 
   CONTEXT_OVERFLOW: 'context.overflow',
   LOOP_MAX_STEPS_EXCEEDED: 'loop.max_steps_exceeded',
+  LOOP_CIRCUIT_BREAKER: 'loop.circuit_breaker',
   PROVIDER_API_ERROR: 'provider.api_error',
   PROVIDER_RATE_LIMIT: 'provider.rate_limit',
   PROVIDER_AUTH_ERROR: 'provider.auth_error',
@@ -302,6 +303,12 @@ export const KIMI_ERROR_INFO = {
     retryable: false,
     public: true,
     action: 'Increase loop_control.max_steps_per_turn in config.toml or split the task.',
+  },
+  'loop.circuit_breaker': {
+    title: 'Circuit breaker triggered',
+    retryable: false,
+    public: true,
+    action: 'The same tool call failed identically 3 times in a row. Modify the approach or fix the underlying issue.',
   },
   'provider.api_error': {
     title: 'Provider API error',

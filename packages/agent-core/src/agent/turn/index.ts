@@ -32,6 +32,7 @@ import {
   type LoopRecordedEvent,
   type LoopTurnInterruptedEvent,
   type LoopTurnStopReason,
+  type LLM,
 } from '../../loop/index';
 import type { AgentEvent, TurnEndedEvent, TurnEndReason } from '../../rpc';
 import type { TelemetryPropertyValue } from '../../telemetry';
@@ -112,12 +113,18 @@ export class TurnFlow {
   private readonly stepFailureByTurn = new Map<number, LoopTurnInterruptedEvent>();
   private currentStep = 0;
   private manifestSyncTurnId = -1;
+  private _llmForTurn?: LLM;
 
   get activeStep(): number {
     return this.currentStep;
   }
 
   constructor(protected readonly agent: Agent) {}
+
+  /** Ephemeral per-turn LLM override. Set by host before prompt(). Cleared after turn. */
+  setLLMForTurn(llm: LLM | undefined): void {
+    this._llmForTurn = llm;
+  }
 
   /** Best-effort agent id (main / generated id) derived from the agent homedir. */
   private get agentId(): string {
@@ -644,7 +651,7 @@ export class TurnFlow {
         const result = await runTurn({
           turnId: String(turnId),
           signal,
-          llm: this.agent.llm,
+          llm: this._llmForTurn ?? this.agent.llm,
           buildMessages: () => this.agent.context.messages,
           dispatchEvent: this.buildDispatchEvent(turnId),
           tools: this.agent.tools.loopTools,
@@ -798,6 +805,24 @@ export class TurnFlow {
         ) {
           await this.agent.fullCompaction.handleOverflowError(signal, error);
           continue; // Retry with compacted context
+        }
+        // Output limit exceeded (e.g. max_tokens must be <= 4096).
+        // Learn the limit and retry — no compaction needed.
+        if (
+          error instanceof APIStatusError &&
+          error.statusCode === 400 &&
+          (error as unknown as { learnedOutputLimit?: number }).learnedOutputLimit !== undefined
+        ) {
+          const limit = (error as unknown as { learnedOutputLimit: number }).learnedOutputLimit;
+          const modelAlias = this.agent.config.modelAlias;
+          if (modelAlias) {
+            const resolved = this.agent.modelProvider?.resolveProviderConfig(modelAlias);
+            const providerId = resolved?.providerName;
+            if (providerId) {
+              await this.agent.learnProviderConstraint?.(providerId, limit);
+            }
+          }
+          continue; // Retry with new output cap applied
         }
         if (isMaxStepsExceededError(error)) {
           this.agent.log.warn('turn hit max steps', {

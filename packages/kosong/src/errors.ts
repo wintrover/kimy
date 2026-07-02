@@ -123,6 +123,23 @@ export function isContextOverflowErrorCode(code: string | null | undefined): boo
   return code === 'context_length_exceeded';
 }
 
+function parseOutputLimitFromMessage(message: string): number | undefined {
+  // Pattern 1: "max_completion_tokens (393216 > 262144)" → 262144
+  const parenMatch = message.match(/max_(?:completion_)?tokens\s*\(\d+\s*>\s*(\d+)\)/);
+  if (parenMatch) return parseInt(parenMatch[1]!, 10);
+  // Pattern 2: "max_tokens must be less than or equal to 4096" → 4096
+  const lteMatch = message.match(
+    /max_(?:completion_)?tokens?\s+must\s+be\s+(?:less\s+than\s+or\s+)?equal\s+to\s+(\d+)/i,
+  );
+  if (lteMatch) return parseInt(lteMatch[1]!, 10);
+  return undefined;
+}
+
+export function isOutputLimitError(statusCode: number, message: string): boolean {
+  if (statusCode !== 400) return false;
+  return parseOutputLimitFromMessage(message) !== undefined;
+}
+
 export function normalizeAPIStatusError(
   statusCode: number,
   message: string,
@@ -134,7 +151,16 @@ export function normalizeAPIStatusError(
   if (isContextOverflowStatusError(statusCode, message)) {
     return new APIContextOverflowError(statusCode, message, requestId);
   }
-  return new APIStatusError(statusCode, message, requestId);
+  const error = new APIStatusError(statusCode, message, requestId);
+  const learnedOutputLimit = parseOutputLimitFromMessage(message);
+  if (learnedOutputLimit !== undefined) {
+    Object.defineProperty(error, 'learnedOutputLimit', {
+      value: learnedOutputLimit,
+      enumerable: false,
+      writable: false,
+    });
+  }
+  return error;
 }
 
 export function isContextOverflowStatusError(statusCode: number, message: string): boolean {

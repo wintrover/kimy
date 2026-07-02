@@ -15,6 +15,7 @@ export interface ModelCapability {
   readonly thinking: boolean;
   readonly tool_use: boolean;
   readonly max_context_tokens: number;
+  readonly max_output_tokens: number;
 }
 
 const UNKNOWN_CAPABILITY_MARKER = Symbol.for('moonshot-ai.kosong.UNKNOWN_CAPABILITY');
@@ -33,6 +34,7 @@ export const UNKNOWN_CAPABILITY: ModelCapability = Object.freeze(
       thinking: false,
       tool_use: false,
       max_context_tokens: 0,
+      max_output_tokens: 0,
     },
     UNKNOWN_CAPABILITY_MARKER,
     { value: true },

@@ -22,12 +22,12 @@ describe('PlanBoxComponent', () => {
   it('falls back to bare " plan " title when no path is provided', () => {
     const box = new PlanBoxComponent('# Hello', theme, darkColors.success);
     const out = strip(box.render(60).join('\n'));
-    const top = out.split('\n')[0]!;
-    expect(top).toContain('┌ plan ');
-    expect(top).not.toContain('plan:');
+    const bottom = out.split('\n').at(-1)!;
+    expect(bottom).toContain('└ plan ');
+    expect(bottom).not.toContain('plan:');
   });
 
-  it('renders " plan: <basename> " in the top border without the directory prefix', () => {
+  it('renders " plan: <basename> " in the bottom border without the directory prefix', () => {
     const box = new PlanBoxComponent(
       '# Hello',
       theme,
@@ -35,19 +35,19 @@ describe('PlanBoxComponent', () => {
       '/tmp/projects/foo/.kimi-code/plans/very-long-slug-name.md',
     );
     const out = strip(box.render(80).join('\n'));
-    const top = out.split('\n')[0]!;
-    expect(top).toContain(' plan: very-long-slug-name.md ');
-    expect(top).not.toContain('/tmp/');
-    expect(top).not.toContain('…/');
+    const bottom = out.split('\n').at(-1)!;
+    expect(bottom).toContain(' plan: very-long-slug-name.md ');
+    expect(bottom).not.toContain('/tmp/');
+    expect(bottom).not.toContain('…/');
   });
 
-  it('renders a status chip in the top border', () => {
+  it('renders a status chip in the bottom border', () => {
     const box = new PlanBoxComponent('# Hello', theme, darkColors.success, undefined, {
       status: { label: 'Rejected', colorHex: darkColors.error },
     });
     const out = strip(box.render(60).join('\n'));
-    const top = out.split('\n')[0]!;
-    expect(top).toContain(' plan · Rejected ');
+    const bottom = out.split('\n').at(-1)!;
+    expect(bottom).toContain(' plan · Rejected ');
   });
 
   it('keeps path status title to the basename without leaking directories', () => {
@@ -61,33 +61,33 @@ describe('PlanBoxComponent', () => {
       },
     );
     const out = strip(box.render(80).join('\n'));
-    const top = out.split('\n')[0]!;
-    expect(top).toContain(' plan: rejected-plan.md · Rejected ');
-    expect(top).not.toContain('/tmp/');
-    expect(top).not.toContain('…/');
+    const bottom = out.split('\n').at(-1)!;
+    expect(bottom).toContain(' plan: rejected-plan.md · Rejected ');
+    expect(bottom).not.toContain('/tmp/');
+    expect(bottom).not.toContain('…/');
   });
 
   it('wraps the basename in an OSC 8 hyperlink targeting file://', () => {
     const box = new PlanBoxComponent('# Hello', theme, darkColors.success, '/tmp/plan.md');
-    const top = box.render(60)[0]!;
-    expect(top).toContain(`${ESC}]8;;file:///tmp/plan.md${BEL}plan.md${ESC}]8;;${BEL}`);
+    const bottom = box.render(60).at(-1)!;
+    expect(bottom).toContain(`${ESC}]8;;file:///tmp/plan.md${BEL}plan.md${ESC}]8;;${BEL}`);
     // After stripping OSC + CSI, visible width must respect the requested render width.
-    expect(strip(top).length).toBeLessThanOrEqual(60);
+    expect(strip(bottom).length).toBeLessThanOrEqual(60);
   });
 
   it('skips the hyperlink for non-absolute paths but still shows the basename', () => {
     const box = new PlanBoxComponent('# Hello', theme, darkColors.success, 'relative/plan.md');
-    const top = box.render(60)[0]!;
-    expect(top).not.toContain(`${ESC}];`);
-    expect(strip(top)).toContain(' plan: plan.md ');
+    const bottom = box.render(60).at(-1)!;
+    expect(bottom).not.toContain(`${ESC}];`);
+    expect(strip(bottom)).toContain(' plan: plan.md ');
   });
 
   it('degrades to bare " plan " when even the basename does not fit', () => {
     const box = new PlanBoxComponent('# Hello', theme, darkColors.success, '/tmp/plan.md');
     const out = strip(box.render(14).join('\n'));
-    const top = out.split('\n')[0]!;
-    expect(top).toContain(' plan ');
-    expect(top).not.toContain('plan:');
+    const bottom = out.split('\n').at(-1)!;
+    expect(bottom).toContain(' plan ');
+    expect(bottom).not.toContain('plan:');
   });
 
   it('keeps every line within narrow widths', () => {

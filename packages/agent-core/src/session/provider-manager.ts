@@ -4,6 +4,11 @@ import { APIStatusError, getModelCapability, UNKNOWN_CAPABILITY } from '@moonsho
 import type { KimiConfig, ModelAlias, OAuthRef, ProviderConfig } from '../config';
 import { ErrorCodes, isKimiError, KimiError } from '../errors';
 
+/** Provider infrastructure hard limits — declarative contract */
+export const PROVIDER_INFRA_CONSTRAINTS: Record<string, { readonly output?: number }> = {
+  nvidia: { output: 262144 },
+};
+
 export interface BearerTokenProvider {
   getAccessToken(options?: { readonly force?: boolean }): Promise<string>;
 }
@@ -106,6 +111,7 @@ export class ProviderManager implements ModelProvider {
 
     const provider = toKosongProviderConfig(
       providerConfig,
+      providerName,
       alias.model,
       this.options.kimiRequestHeaders,
       alias.maxOutputSize,
@@ -214,11 +220,41 @@ function resolveModelCapabilities(
     thinking: declared.has('thinking') || declared.has('always_thinking') || detected.thinking,
     tool_use: declared.has('tool_use') || detected.tool_use,
     max_context_tokens: alias.maxContextSize,
+    max_output_tokens: alias.maxOutputSize ?? detected.max_output_tokens,
   };
+}
+
+function normalizeModelIdForProvider(model: string, providerType: string): string {
+  switch (providerType) {
+    case 'openai':
+    case 'openai_responses':
+      if (model.startsWith('openrouter/')) {
+        const normalized = model.slice('openrouter/'.length);
+        if (normalized.includes('/')) return normalized;
+      }
+      return model;
+    case 'anthropic':
+      if (model.startsWith('anthropic/')) return model.slice('anthropic/'.length);
+      return model;
+    default:
+      return model;
+  }
+}
+
+function resolveInfraCeiling(
+  providerName: string,
+  configMaxOutput?: number,
+): number | undefined {
+  const infraLimit = PROVIDER_INFRA_CONSTRAINTS[providerName]?.output;
+  if (infraLimit !== undefined && configMaxOutput !== undefined) {
+    return Math.min(infraLimit, configMaxOutput);
+  }
+  return infraLimit ?? configMaxOutput;
 }
 
 function toKosongProviderConfig(
   provider: ProviderConfig,
+  providerName: string,
   model: string,
   kimiRequestHeaders: Record<string, string> | undefined,
   maxOutputSize: number | undefined,
@@ -227,6 +263,8 @@ function toKosongProviderConfig(
   promptCacheKey: string | undefined,
   adaptiveThinking: boolean | undefined,
 ): KosongProviderConfig {
+  model = normalizeModelIdForProvider(model, provider.type);
+  const infraCeiling = resolveInfraCeiling(providerName, maxOutputSize);
   switch (provider.type) {
     case 'anthropic':
       return {
@@ -234,7 +272,7 @@ function toKosongProviderConfig(
         model,
         baseUrl: providerValue(provider.baseUrl, provider.env, 'ANTHROPIC_BASE_URL'),
         apiKey: providerApiKey(provider),
-        ...(maxOutputSize !== undefined ? { defaultMaxTokens: maxOutputSize } : {}),
+        ...(infraCeiling !== undefined ? { defaultMaxTokens: infraCeiling } : {}),
         ...(adaptiveThinking !== undefined ? { adaptiveThinking } : {}),
         ...defaultHeadersField(provider.customHeaders),
       };
@@ -246,6 +284,7 @@ function toKosongProviderConfig(
         apiKey: providerApiKey(provider),
         reasoningKey,
         reasoningEffort,
+        ...(infraCeiling !== undefined ? { defaultMaxTokens: infraCeiling } : {}),
         ...defaultHeadersField(provider.customHeaders),
       };
     case 'kimi':
@@ -255,6 +294,7 @@ function toKosongProviderConfig(
         baseUrl: providerValue(provider.baseUrl, provider.env, 'KIMI_BASE_URL'),
         apiKey: providerApiKey(provider),
         generationKwargs: { prompt_cache_key: promptCacheKey },
+        ...(infraCeiling !== undefined ? { defaultMaxTokens: infraCeiling } : {}),
         ...defaultHeadersField({ ...kimiRequestHeaders, ...provider.customHeaders }),
       };
     case 'google-genai':
@@ -262,6 +302,7 @@ function toKosongProviderConfig(
         type: 'google-genai',
         model,
         apiKey: providerApiKey(provider),
+        ...(infraCeiling !== undefined ? { defaultMaxTokens: infraCeiling } : {}),
       };
     case 'openai_responses':
       return {
@@ -269,6 +310,7 @@ function toKosongProviderConfig(
         model,
         baseUrl: providerValue(provider.baseUrl, provider.env, 'OPENAI_BASE_URL'),
         apiKey: providerApiKey(provider),
+        ...(infraCeiling !== undefined ? { defaultMaxTokens: infraCeiling } : {}),
         ...defaultHeadersField(provider.customHeaders),
       };
     case 'vertexai': {
@@ -280,6 +322,7 @@ function toKosongProviderConfig(
         apiKey: useServiceAccount ? undefined : providerApiKey(provider),
         project: vertexAIProject(provider),
         location: vertexAILocation(provider),
+        ...(infraCeiling !== undefined ? { defaultMaxTokens: infraCeiling } : {}),
       };
     }
     default: {

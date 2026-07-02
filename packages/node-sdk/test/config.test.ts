@@ -315,7 +315,7 @@ describe('KimiHarness config API', () => {
     const homeDir = await makeTempDir();
     const harness = createKimiHarness({ homeDir, identity: TEST_IDENTITY });
 
-    await expect(harness.getConfig()).resolves.toEqual({ providers: {} });
+    await expect(harness.getConfig()).resolves.toEqual({ providers: {}, agentRole: 'default' });
   });
 
   it('returns experimental feature metadata through the harness', async () => {

@@ -21,6 +21,7 @@ describe('Agent config', () => {
       thinking: false,
       tool_use: true,
       max_context_tokens: 128000,
+      max_output_tokens: 0,
     };
     ctx.configure({
       provider: initialProvider,
@@ -47,6 +48,7 @@ describe('Agent config', () => {
       thinking: true,
       tool_use: true,
       max_context_tokens: 262144,
+      max_output_tokens: 0,
     };
     ctx.configureRuntimeModel(nextProvider, nextCapability);
     ctx.agent.config.update({

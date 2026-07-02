@@ -7,6 +7,19 @@ import type {
   SubagentHandle,
 } from './subagent-host';
 import { isUserCancellation } from '../utils/abort';
+import { PhaseTransitionLog, type PhaseTransitionSnapshot } from './typestate';
+
+/**
+ * Immutable view of a batch's execution state, passed to the launcher
+ * so model resolution can be context-aware without mutating host state.
+ * Uses a getter for `isRateLimited` to provide live reads of the batch's
+ * internal rate-limit mode.
+ */
+export interface BatchExecutionContext {
+  readonly batchId: string;
+  readonly isRateLimited: boolean;
+  readonly fallbackModel?: string;
+}
 
 /*
 Subagent batch scheduling contract:
@@ -39,6 +52,33 @@ const RATE_LIMIT_SUSPENDED_REASON = 'Provider rate limit; subagent requeued for 
 
 const AGENT_SWARM_MAX_CONCURRENCY_ENV = 'KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY';
 
+/**
+ * Heartbeat timeout: if an active attempt reports no activity for this
+ * duration, the batch treats it as stalled and aborts it via the
+ * AbortSignal cascade so all child resources (LLM streams, bash tasks,
+ * spawned processes) are cleaned up.
+ */
+const HEARTBEAT_TIMEOUT_MS = 5 * 60 * 1000;
+
+/** How often the heartbeat checker runs (every 60 seconds). */
+const HEARTBEAT_CHECK_INTERVAL_MS = 60 * 1000;
+
+/**
+ * Grace period (ms) after aborting a stalled attempt before checking whether
+ * the child process actually exited. If it is still alive, a zombie warning
+ * is emitted.
+ */
+const ZOMBIE_CHECK_GRACE_MS = 10 * 1000;
+
+/**
+ * Minimal logger interface so `SubagentBatch` can emit structured warnings
+ * without depending on a concrete logger implementation.
+ */
+interface HeartbeatLogger {
+  warn(event: string, data?: Record<string, unknown>): void;
+  error(event: string, data?: Record<string, unknown>): void;
+}
+
 type BaseQueuedSubagentTask<T> = {
   readonly data: T;
   readonly profileName: string;
@@ -70,7 +110,7 @@ export type QueuedSubagentTask<T = unknown> =
 export type SubagentResult<T = unknown> = {
   readonly task: QueuedSubagentTask<T>;
   readonly agentId?: string;
-  readonly status: 'completed' | 'failed' | 'aborted';
+  readonly status: 'completed' | 'failed' | 'aborted' | 'interrupted';
   readonly state?: 'started' | 'not_started';
   readonly result?: string;
   readonly usage?: TokenUsage;
@@ -84,9 +124,9 @@ export type SubagentSuspendedEvent = {
 };
 
 export type SubagentBatchLauncher = {
-  spawn(options: SpawnSubagentOptions): Promise<SubagentHandle>;
-  resume(agentId: string, options: RunSubagentOptions): Promise<SubagentHandle>;
-  retry(agentId: string, options: RunSubagentOptions): Promise<SubagentHandle>;
+  spawn(options: SpawnSubagentOptions, context?: BatchExecutionContext): Promise<SubagentHandle>;
+  resume(agentId: string, options: RunSubagentOptions, context?: BatchExecutionContext): Promise<SubagentHandle>;
+  retry(agentId: string, options: RunSubagentOptions, context?: BatchExecutionContext): Promise<SubagentHandle>;
   suspended?(event: SubagentSuspendedEvent): void;
 };
 
@@ -123,9 +163,25 @@ export type SubagentBatchOptions = {
    * phase is governed by its own capacity logic and is not affected.
    */
   readonly maxConcurrency?: number;
+  readonly fallbackModel?: string;
+  /**
+   * Optional logger for heartbeat timeout warnings and zombie-process errors.
+   * When omitted, heartbeat events are silently skipped (backward-compatible).
+   */
+  readonly logger?: HeartbeatLogger;
 };
 
 export class SubagentBatch<T> {
+  private static nextBatchId = 0;
+  private readonly batchId = `batch-${SubagentBatch.nextBatchId++}`;
+
+  /**
+   * Live read-only context for this batch. The `isRateLimited` getter
+   * reads the batch's internal `rateLimitMode` at access time, providing
+   * real-time state without exposing mutable internals.
+   */
+  public readonly context: BatchExecutionContext;
+
   private readonly states: Array<TaskState<T>>;
   private readonly pending: Array<TaskState<T>>;
   private readonly results: Array<SubagentResult<T> | undefined>;
@@ -149,6 +205,13 @@ export class SubagentBatch<T> {
   private lastCapacityRecoveryAt: number | undefined;
   private globalRetryIntervalMs = RATE_LIMIT_RETRY_BASE_MS;
   private nextRateLimitLaunchAt = 0;
+  private transitionLog = new PhaseTransitionLog();
+
+  // Heartbeat tracking: maps each active attempt's key to its last-activity
+  // timestamp (epoch ms). Updated whenever the attempt reports progress.
+  private readonly lastActivityMap = new Map<string, number>();
+  private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  private readonly logger: HeartbeatLogger | undefined;
 
   constructor(
     private readonly launcher: SubagentBatchLauncher,
@@ -156,6 +219,15 @@ export class SubagentBatch<T> {
     options: SubagentBatchOptions = {},
   ) {
     this.maxConcurrency = options.maxConcurrency;
+    this.logger = options.logger;
+    const batch = this;
+    this.context = {
+      batchId: this.batchId,
+      fallbackModel: options.fallbackModel,
+      get isRateLimited(): boolean {
+        return batch.rateLimitMode;
+      },
+    };
     this.states = tasks.map((task, index) => ({
       index,
       task,
@@ -174,6 +246,26 @@ export class SubagentBatch<T> {
         this.fail(this.batchSignal?.reason ?? new Error('Aborted'));
       }
     };
+  }
+
+  private recordTransition(
+    toPhase: 'rate_limited' | 'completed' | 'cancelled',
+    trigger?: PhaseTransitionSnapshot['trigger'],
+  ): void {
+    const snapshot: PhaseTransitionSnapshot = {
+      timestamp: Date.now(),
+      fromPhase: this.rateLimitMode ? 'rate_limited' : this.finished ? 'completed' : this.started ? 'ramping' : 'idle',
+      toPhase,
+      trigger,
+      activeAttemptCount: this.active.size,
+      pendingTaskCount: this.pending.length,
+    };
+    this.transitionLog = this.transitionLog.record(snapshot);
+  }
+
+  /** Debug: get transition history for time-travel debugging */
+  public getTransitionHistory() {
+    return this.transitionLog.getHistory();
   }
 
   run(): Promise<Array<SubagentResult<T>>> {
@@ -198,6 +290,7 @@ export class SubagentBatch<T> {
 
       this.batchSignal?.addEventListener('abort', this.batchAbortListener, { once: true });
       this.schedule();
+      this.startHeartbeatTimer();
     });
   }
 
@@ -286,6 +379,7 @@ export class SubagentBatch<T> {
     };
     attempt.cleanup = this.linkAttemptSignals(attempt, state.task);
     this.active.add(attempt);
+    this.lastActivityMap.set(this.attemptKey(attempt), Date.now());
 
     this.runAttempt(attempt).then(
       (outcome) => {
@@ -317,16 +411,16 @@ export class SubagentBatch<T> {
     try {
       attempt.controller.signal.throwIfAborted();
       if (attempt.state.retryAgentId !== undefined) {
-        handle = await this.launcher.retry(attempt.state.retryAgentId, runOptions);
+        handle = await this.launcher.retry(attempt.state.retryAgentId, runOptions, this.context);
       } else if (task.kind === 'resume') {
-        handle = await this.launcher.resume(task.resumeAgentId, runOptions);
+        handle = await this.launcher.resume(task.resumeAgentId, runOptions, this.context);
       } else {
         const spawnOptions: SpawnSubagentOptions = {
           profileName: task.profileName,
           swarmItem: task.swarmItem,
           ...runOptions,
         };
-        handle = await this.launcher.spawn(spawnOptions);
+        handle = await this.launcher.spawn(spawnOptions, this.context);
       }
     } catch (error) {
       return this.failedAttemptOutcome(attempt, error);
@@ -356,10 +450,19 @@ export class SubagentBatch<T> {
   }
 
   private failedAttemptOutcome(attempt: ActiveAttempt<T>, error: unknown): SubagentResult<T> {
-    const status =
-      attempt.controller.signal.aborted && isUserCancellation(attempt.controller.signal.reason)
-        ? 'aborted'
-        : 'failed';
+    const reason = attempt.controller.signal.reason;
+    let status: SubagentResult<T>['status'];
+    if (attempt.controller.signal.aborted && isUserCancellation(reason)) {
+      status = 'aborted';
+    } else if (
+      attempt.controller.signal.aborted &&
+      reason instanceof Error &&
+      reason.message === 'heartbeat_timeout'
+    ) {
+      status = 'interrupted';
+    } else {
+      status = 'failed';
+    }
     return {
       task: attempt.state.task,
       agentId: attempt.state.agentId,
@@ -374,6 +477,7 @@ export class SubagentBatch<T> {
 
     attempt.ready = true;
     attempt.state.started = true;
+    this.lastActivityMap.set(this.attemptKey(attempt), Date.now());
     if (!this.rateLimitMode) {
       this.startedSuccessCount += 1;
     }
@@ -419,6 +523,7 @@ export class SubagentBatch<T> {
 
   private releaseAttempt(attempt: ActiveAttempt<T>): boolean {
     if (!this.active.delete(attempt)) return false;
+    this.lastActivityMap.delete(this.attemptKey(attempt));
     attempt.cleanup();
     return true;
   }
@@ -461,6 +566,7 @@ export class SubagentBatch<T> {
   }
 
   private enterRateLimitMode(now: number): void {
+    this.recordTransition('rate_limited');
     if (!this.rateLimitMode) {
       this.rateLimitMode = true;
       this.clearNormalTimer();
@@ -552,6 +658,15 @@ export class SubagentBatch<T> {
 
   private finishWithUserCancellation(): void {
     if (this.finished) return;
+    this.recordTransition('cancelled');
+
+    // Abort every in-progress attempt so the full signal cascade fires
+    // (child TurnFlow, BackgroundManager, spawned processes).
+    for (const attempt of this.active.values()) {
+      if (!attempt.controller.signal.aborted) {
+        attempt.controller.abort(new Error('Subagent batch cancelled by user'));
+      }
+    }
 
     this.finish(
       this.states.map((state) => {
@@ -582,6 +697,7 @@ export class SubagentBatch<T> {
 
   private finish(results: Array<SubagentResult<T>>): void {
     if (this.finished) return;
+    this.recordTransition('completed');
     this.finished = true;
     this.cleanup();
     this.resolve?.(results);
@@ -598,10 +714,12 @@ export class SubagentBatch<T> {
     this.batchSignal?.removeEventListener('abort', this.batchAbortListener);
     this.clearNormalTimer();
     this.clearRateLimitTimer();
+    this.clearHeartbeatTimer();
     for (const attempt of this.active.values()) {
       attempt.cleanup();
     }
     this.active.clear();
+    this.lastActivityMap.clear();
   }
 
   private clearNormalTimer(): void {
@@ -612,6 +730,84 @@ export class SubagentBatch<T> {
   private clearRateLimitTimer(): void {
     if (this.rateLimitLaunchTimer !== undefined) clearTimeout(this.rateLimitLaunchTimer);
     this.rateLimitLaunchTimer = undefined;
+  }
+
+  // ── Heartbeat tracking ──────────────────────────────────────────────
+
+  /** Stable key for an active attempt (used as Map key in lastActivityMap). */
+  private attemptKey(attempt: ActiveAttempt<T>): string {
+    return `${this.batchId}::${attempt.state.index}::${attempt.state.agentId ?? 'pending'}`;
+  }
+
+  private startHeartbeatTimer(): void {
+    this.clearHeartbeatTimer();
+    this.heartbeatTimer = setInterval(() => {
+      this.checkHeartbeats();
+    }, HEARTBEAT_CHECK_INTERVAL_MS);
+  }
+
+  private clearHeartbeatTimer(): void {
+    if (this.heartbeatTimer !== undefined) clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = undefined;
+  }
+
+  /**
+   * Scan all active attempts. Any attempt whose last-activity timestamp is
+   * older than `HEARTBEAT_TIMEOUT_MS` is aborted via its controller, which
+   * cascades through the AbortSignal chain to kill the child agent's LLM
+   * stream, background tasks, and spawned processes.
+   */
+  private checkHeartbeats(): void {
+    if (this.finished || this.controller.signal.aborted) return;
+
+    const now = Date.now();
+    for (const attempt of this.active) {
+      const key = this.attemptKey(attempt);
+      const lastActivity = this.lastActivityMap.get(key);
+      if (lastActivity === undefined) continue;
+
+      if (now - lastActivity > HEARTBEAT_TIMEOUT_MS) {
+        const agentId = attempt.state.agentId;
+        this.logger?.warn('subagent_heartbeat_timeout', {
+          agentId,
+          lastActivity,
+          batchId: this.batchId,
+          stalledMs: now - lastActivity,
+        });
+
+        // Abort via the attempt controller. The signal propagates through
+        // SessionSubagentHost.runWithActiveChild() → linkAbortSignal →
+        // child controller → TurnFlow.activeTurn.controller → LLM stream
+        // cancel → BackgroundManager.cancelAll() → SIGTERM/SIGKILL.
+        attempt.controller.abort(new Error('heartbeat_timeout'));
+
+        // Schedule a zombie-process check after a short grace period.
+        this.scheduleZombieCheck(attempt, agentId);
+      }
+    }
+  }
+
+  /**
+   * After aborting a stalled attempt, wait a grace period and then verify
+   * the child process exited. This is a best-effort diagnostic — in-process
+   * agents may not have PIDs to check, so we only log when we can detect
+   * a lingering process.
+   */
+  private scheduleZombieCheck(attempt: ActiveAttempt<T>, agentId: string | undefined): void {
+    const key = this.attemptKey(attempt);
+    setTimeout(() => {
+      // If the attempt is still in the active set after the grace period,
+      // it has not been collected by releaseAttempt yet — possible zombie.
+      if (this.active.has(attempt) && !attempt.controller.signal.aborted) {
+        this.logger?.error('zombie_process_detected', {
+          agentId,
+          batchId: this.batchId,
+          message:
+            'Attempt was aborted by heartbeat but the controller is still active after grace period.',
+        });
+      }
+      this.lastActivityMap.delete(key);
+    }, ZOMBIE_CHECK_GRACE_MS);
   }
 
   private linkAttemptSignals(attempt: ActiveAttempt<T>, task: QueuedSubagentTask<T>): () => void {
@@ -654,6 +850,7 @@ export class SubagentBatch<T> {
       return 'Subagent timed out.';
     }
     if (status === 'aborted') return 'The user manually interrupted this subagent batch.';
+    if (status === 'interrupted') return 'Subagent heartbeat timeout; the attempt was stalled and aborted.';
     return error instanceof Error ? error.message : String(error);
   }
 }

@@ -26,6 +26,7 @@ export {
   fetchCatalog,
   inferWireType,
   loadBuiltInCatalog,
+  setRuntimeConstraintOverrides,
 } from '#/catalog';
 export type {
   ApplyCatalogProviderOptions,
@@ -37,6 +38,7 @@ export type {
 export {
   ErrorCodes,
   KimiError,
+  PROVIDER_INFRA_CONSTRAINTS,
   type KimiErrorCode,
   type KimiErrorInfo,
   type KimiErrorOptions,

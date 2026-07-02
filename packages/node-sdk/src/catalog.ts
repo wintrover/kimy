@@ -1,4 +1,10 @@
-import type { KimiConfig, ModelAlias } from '@moonshot-ai/agent-core';
+import {
+  getRuntimeConstraintOverrides,
+  PROVIDER_INFRA_CONSTRAINTS,
+  setRuntimeConstraintOverrides,
+  type KimiConfig,
+  type ModelAlias,
+} from '@moonshot-ai/agent-core';
 import {
   catalogBaseUrl,
   catalogProviderModels,
@@ -11,7 +17,10 @@ import {
 } from '@moonshot-ai/kosong';
 
 export { catalogBaseUrl, catalogProviderModels, inferWireType };
+export { setRuntimeConstraintOverrides } from '@moonshot-ai/agent-core';
 export type { Catalog, CatalogModel, CatalogProviderEntry };
+
+
 
 export const DEFAULT_CATALOG_URL = 'https://models.dev/api.json';
 
@@ -52,6 +61,23 @@ function capabilityToStrings(capability: ModelCapability): string[] | undefined 
 
 /** Builds a kimi-code model alias from a normalized catalog model. */
 export function catalogModelToAlias(providerId: string, model: CatalogModel): ModelAlias {
+  // Merge static infra constraints with runtime-learned overrides.
+  // The tightest (lowest) limit from any source wins.
+  const staticInfra = PROVIDER_INFRA_CONSTRAINTS[providerId];
+  const learnedInfra = getRuntimeConstraintOverrides()[providerId];
+
+  const outputLimit = [staticInfra?.output, learnedInfra?.output]
+    .filter((v): v is number => v !== undefined)
+    .reduce((min, v) => Math.min(min, v), Infinity);
+
+  if (outputLimit !== Infinity) {
+    const current = model.maxOutputSize;
+    model = {
+      ...model,
+      maxOutputSize: current !== undefined ? Math.min(current, outputLimit) : outputLimit,
+    };
+  }
+
   return {
     provider: providerId,
     model: model.id,

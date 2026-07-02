@@ -8,9 +8,13 @@ const mocks = vi.hoisted(() => ({
   realpath: vi.fn((p: string) => Promise.resolve(p)),
 }));
 
-vi.mock('node:child_process', () => ({
-  spawn: mocks.spawn,
-}));
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return {
+    ...actual,
+    spawn: mocks.spawn,
+  };
+});
 
 // `FsGitService.status` awaits `fs.realpath(cwd)` before spawning; realpath is a
 // libuv/macrotask callback, which would let a microtask-only flush in the test

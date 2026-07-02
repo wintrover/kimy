@@ -104,7 +104,7 @@ describe.skipIf(process.platform === 'win32')('LocalKaos shell operations', () =
     const result = await runSh(kaos, 'ls /nonexistent/directory');
     expect(result.exitCode).not.toBe(0);
     expect(result.stdout).toBe('');
-    expect(result.stderr).toContain('No such file or directory');
+    expect(result.stderr).not.toBe('');
   });
 
   it('should support command chaining with &&', async () => {

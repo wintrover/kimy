@@ -342,6 +342,8 @@ export interface OpenAIResponsesOptions {
   defaultHeaders?: Record<string, string>;
   toolMessageConversion?: ToolMessageConversion | undefined;
   clientFactory?: (auth: ProviderRequestAuth) => OpenAI;
+  /** Provider-level infra ceiling for output tokens (safety net for unknown models). */
+  defaultMaxTokens?: number | undefined;
 }
 
 export interface OpenAIResponsesGenerationKwargs {
@@ -986,6 +988,7 @@ export class OpenAIResponsesChatProvider implements ChatProvider {
   private _defaultHeaders: Record<string, string> | undefined;
   private _generationKwargs: OpenAIResponsesGenerationKwargs;
   private _toolMessageConversion: ToolMessageConversion;
+  private _defaultMaxTokens: number | undefined;
   private _client: OpenAI | undefined;
   private _httpClient: unknown;
   private _clientFactory: ((auth: ProviderRequestAuth) => OpenAI) | undefined;
@@ -999,6 +1002,7 @@ export class OpenAIResponsesChatProvider implements ChatProvider {
     this._stream = true; // Responses API always supports streaming
     this._generationKwargs = {};
     this._toolMessageConversion = options.toolMessageConversion ?? null;
+    this._defaultMaxTokens = options.defaultMaxTokens;
     this._httpClient = options.httpClient;
     this._clientFactory = options.clientFactory;
 

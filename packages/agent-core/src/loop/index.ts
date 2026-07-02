@@ -73,5 +73,9 @@ export type {
   ToolCallDelta,
 } from './llm';
 
-export { runTurn } from './run-turn';
+export { runTurn, shouldTriggerCircuitBreaker } from './run-turn';
 export type { RunTurnInput } from './run-turn';
+
+export type { ToolCallSnapshot } from './tool-call';
+
+export { translateSandboxPaths } from './tool-call';

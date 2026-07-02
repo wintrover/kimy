@@ -13,6 +13,8 @@
  * should be reviewed together.
  */
 
+import { join } from 'node:path';
+
 import type { ContentPart } from '@moonshot-ai/kosong';
 
 import type { Logger } from '#/logging/types';
@@ -38,6 +40,42 @@ import type {
 const GRACE_TIMEOUT_MS = 2_000;
 const TOOL_OUTPUT_EMPTY = 'Tool output is empty.';
 const TOOL_OUTPUT_NON_TEXT = 'Tool returned non-text content.';
+
+function simpleHash(s: string): number {
+  let h = 5381;
+  for (let i = 0; i < s.length; i += 1) {
+    h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  }
+  return h;
+}
+
+/**
+ * Temporary post-processor: translates sandbox paths to host paths in tool results.
+ * Bridges the gap until F1 (bidirectional path translation) is complete.
+ *
+ * Matches /workspace (or //workspace) followed by optional path segments,
+ * handling slash-duplication and non-normalized paths from compilers/toolchains.
+ */
+export function translateSandboxPaths(
+  output: string,
+  sandboxRoot: string,
+  hostRoot: string
+): string {
+  if (!sandboxRoot || !hostRoot || sandboxRoot === hostRoot) return output;
+  const escaped = sandboxRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const sRootNoSlash = sandboxRoot.startsWith('/') ? sandboxRoot.slice(1) : sandboxRoot;
+  // Pass 1: handle //sandboxRoot (double-slash from toolchains/compilers)
+  let result = output.replace(
+    new RegExp(`//${sRootNoSlash}(/[^\\s'"]*)?`, 'g'),
+    (match: string, p1: string | undefined) => (p1 ? join(hostRoot, p1.slice(1)) : hostRoot),
+  );
+  // Pass 2: handle /sandboxRoot at word boundary (not preceded by / or \w)
+  result = result.replace(
+    new RegExp(`(?<![/\\w])${escaped}(/[^\\s'"]*)?`, 'g'),
+    (match: string, p1: string | undefined) => (p1 ? join(hostRoot, p1.slice(1)) : hostRoot),
+  );
+  return result;
+}
 
 /**
  * Output for an aborted tool call. When the abort carries a user-cancellation
@@ -107,6 +145,14 @@ interface PreparedToolCallTask {
 
 type ToolCallDisplayFields = Pick<LoopToolCallEvent, 'description' | 'display'>;
 
+export interface ToolCallSnapshot {
+  readonly toolName: string;
+  readonly argsHash: string;
+  readonly exitCode: number;
+  readonly stderrHash: string;
+  readonly sourceUnchanged: boolean;
+}
+
 export interface ToolCallBatchResult {
   readonly stopTurn: boolean;
   /**
@@ -116,6 +162,7 @@ export interface ToolCallBatchResult {
    * a correction message and re-invoke the LLM.
    */
   readonly virtualTurn?: boolean | undefined;
+  readonly snapshots?: readonly ToolCallSnapshot[] | undefined;
 }
 
 export async function runToolCallBatch(
@@ -157,6 +204,7 @@ export async function runToolCallBatch(
   const scheduler = new ToolScheduler<PendingToolResult>();
   const pendingResults: Array<Promise<PendingToolResult>> = [];
   let stopTurn = false;
+  const snapshots: ToolCallSnapshot[] = [];
 
   try {
     for (let index = 0; index < calls.length; index += 1) {
@@ -180,6 +228,7 @@ export async function runToolCallBatch(
     for (const pendingResult of pendingResults) {
       const result = await finalizePendingToolResult(batchStep, await pendingResult);
       if (result.stopTurn === true) stopTurn = true;
+      snapshots.push(buildToolCallSnapshot(result));
       await step.dispatchEvent({
         type: 'tool.result',
         parentUuid: result.toolCall.id,
@@ -193,7 +242,7 @@ export async function runToolCallBatch(
     // execute promises cannot surface as detached unhandled rejections.
     await Promise.allSettled(pendingResults);
   }
-  return { stopTurn };
+  return { stopTurn, snapshots };
 }
 
 /**
@@ -785,4 +834,18 @@ function isMixedAgentSwarmBatch(toolCalls: readonly ToolCall[]): boolean {
   const hasAgentSwarm = toolCalls.some((tc) => tc.name === 'AgentSwarm');
   if (!hasAgentSwarm) return false;
   return toolCalls.length > 1;
+}
+
+function buildToolCallSnapshot(result: PendingToolResult): ToolCallSnapshot {
+  const isError = result.result.isError === true;
+  const outputText = typeof result.result.output === 'string'
+    ? result.result.output
+    : '';
+  return {
+    toolName: result.toolName,
+    argsHash: String(simpleHash(JSON.stringify(result.args) ?? '')),
+    exitCode: isError ? 1 : 0,
+    stderrHash: isError ? String(simpleHash(outputText)) : '0',
+    sourceUnchanged: true,
+  };
 }

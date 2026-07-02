@@ -107,4 +107,8 @@ export interface PermissionPolicy {
   evaluate(
     context: PermissionPolicyContext,
   ): PermissionPolicyResult | undefined | Promise<PermissionPolicyResult | undefined>;
+  onSelected?(
+    context: PermissionPolicyContext,
+    result: PermissionPolicyResult,
+  ): void;
 }
