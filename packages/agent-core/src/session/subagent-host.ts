@@ -105,7 +105,6 @@ export type SubagentHandle = {
 export class SessionSubagentHost {
   private _runtimeSubagentModel: string | null = null;
   private readonly circuitBreaker = new ProviderCircuitBreaker();
-  private readonly modelProviderMap = new Map<string, string>();
   private readonly activeChildren = new Map<
     string,
     {
@@ -137,11 +136,6 @@ export class SessionSubagentHost {
   /** Record a failed provider call for circuit breaker tracking */
   public recordProviderFailure(providerId: string): void {
     this.circuitBreaker.recordFailure(providerId);
-  }
-
-  /** Register a model → provider mapping for circuit-aware routing */
-  public registerModelProvider(modelAlias: string, providerId: string): void {
-    this.modelProviderMap.set(modelAlias, providerId);
   }
 
   async spawn(options: SpawnSubagentOptions, context?: BatchExecutionContext): Promise<SubagentHandle> {
@@ -409,8 +403,28 @@ export class SessionSubagentHost {
    * Uses the pure model-router function with circuit breaker awareness
    * for deterministic, verifiable routing decisions.
    */
-  private resolveChildModel(parent: Agent, context?: BatchExecutionContext): string {
+  private resolveChildModel(parent: Agent, context?: BatchExecutionContext, child?: Agent): string {
     const config = this.session.options.config;
+
+    // Build a dynamic model→provider map from the child's ModelProvider
+    const dynamicProviderMap = new Map<string, string>();
+    if (child?.modelProvider) {
+      const candidateModels = [
+        this._runtimeSubagentModel,
+        config?.subagentModel,
+        parent.config.modelAlias,
+        config?.defaultModel,
+        config?.subagentFallbackModel,
+      ].filter((m): m is string => !!m);
+      for (const model of new Set(candidateModels)) {
+        try {
+          const { providerName } = child.modelProvider.resolveProviderConfig(model);
+          dynamicProviderMap.set(model, providerName);
+        } catch {
+          // unregistered model — skip
+        }
+      }
+    }
 
     // Build snapshot for deterministic routing
     const snapshot = createRoutingSnapshot({
@@ -423,7 +437,7 @@ export class SessionSubagentHost {
         ? [config.subagentFallbackModel]
         : undefined,
       circuitStates: createCircuitSnapshot(this.circuitBreaker),
-      modelProviderMap: this.modelProviderMap,
+      modelProviderMap: dynamicProviderMap,
     });
 
     const output = resolveModel(snapshot);
@@ -437,12 +451,19 @@ export class SessionSubagentHost {
     context?: BatchExecutionContext,
   ): Promise<void> {
     // A subagent always inherits the parent agent's model.
-    child.config.setModelAliasResolver(() => this.resolveChildModel(parent, context));
+    child.config.setModelAliasResolver(() => this.resolveChildModel(parent, context, child));
 
     // Rate-limit fallback: on 429, force-open circuit and re-resolve model
     child.setOnRateLimit(async () => {
       const modelAlias = child.config.modelAlias;
-      const providerId = modelAlias ? this.modelProviderMap.get(modelAlias) : undefined;
+      let providerId: string | undefined;
+      if (modelAlias && child.modelProvider) {
+        try {
+          providerId = child.modelProvider.resolveProviderConfig(modelAlias).providerName;
+        } catch {
+          // resolve failure (unregistered model etc.) — skip fallback
+        }
+      }
       if (providerId) {
         this.circuitBreaker.forceOpen(providerId);
       }

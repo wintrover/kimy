@@ -1217,6 +1217,125 @@ describe('subagent model resolution', () => {
     }
     expect(violations).toEqual([]);
   });
+
+  it('subagent-host source no longer contains static modelProviderMap field or registerModelProvider method', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('pathe');
+    const source = readFileSync(
+      join(__dirname, '../../src/session/subagent-host.ts'),
+      'utf-8',
+    );
+    // The old dead-code static field and method must be removed.
+    // (The string "modelProviderMap" may still appear as a parameter key in
+    // createRoutingSnapshot calls — only the field declaration is forbidden.)
+    expect(source).not.toContain('private readonly modelProviderMap');
+    expect(source).not.toContain('public registerModelProvider');
+    expect(source).not.toContain('this.modelProviderMap');
+  });
+
+  it('onRateLimitFallback resolves provider JIT through child.modelProvider', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.newEvents();
+
+    const child = testAgent();
+    const summary =
+      'Completed the delegated task with enough detail for the parent agent to continue confidently without repeating any of the child agent work. '.repeat(
+        2,
+      );
+    child.mockNextResponse({ type: 'text', text: summary });
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn({
+      profileName: 'coder',
+      parentToolCallId: 'call_agent',
+      prompt: 'Do the task',
+      description: 'Task',
+      runInBackground: false,
+      signal,
+    });
+    await handle.completion;
+
+    // configureChild installs a rate limit handler on the child
+    const handler = child.agent.rateLimitHandler;
+    expect(handler).toBeDefined();
+
+    // The handler resolves the provider through child.modelProvider.resolveProviderConfig
+    // rather than through the (now-removed) static modelProviderMap.
+    // Calling it with a synthetic error should not throw — it resolves
+    // 'mock-model' → 'test-provider' via the child's ModelProvider.
+    const result = await handler(new Error('simulated rate limit'));
+    expect(result).toBeDefined();
+  });
+
+  it('onRateLimitFallback handles unregistered model gracefully', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.newEvents();
+
+    const child = testAgent();
+    const summary =
+      'Completed the delegated task with enough detail for the parent agent to continue confidently without repeating any of the child agent work. '.repeat(
+        2,
+      );
+    child.mockNextResponse({ type: 'text', text: summary });
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn({
+      profileName: 'coder',
+      parentToolCallId: 'call_agent',
+      prompt: 'Do the task',
+      description: 'Task',
+      runInBackground: false,
+      signal,
+    });
+    await handle.completion;
+
+    // Set the child's model to an alias the ModelProvider doesn't know about
+    child.agent.config.update({ modelAlias: 'completely-unknown-model' });
+
+    const handler = child.agent.rateLimitHandler;
+    expect(handler).toBeDefined();
+
+    // The handler catches the resolveProviderConfig error and skips the
+    // circuit breaker — it should still return an LLM without crashing.
+    const result = await handler(new Error('simulated rate limit'));
+    expect(result).toBeDefined();
+  });
+
+  it('resolveChildModel builds dynamic provider map from child.modelProvider', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.newEvents();
+
+    const child = testAgent();
+    const summary =
+      'Completed the delegated task with enough detail for the parent agent to continue confidently without repeating any of the child agent work. '.repeat(
+        2,
+      );
+    child.mockNextResponse({ type: 'text', text: summary });
+
+    // Use a config with subagentModel so the dynamic map has a non-trivial candidate
+    const session = fakeSession(parent.agent, child.agent, {}, { subagentModel: 'mock-model' });
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn({
+      profileName: 'coder',
+      parentToolCallId: 'call_agent',
+      prompt: 'Do the task',
+      description: 'Task',
+      runInBackground: false,
+      signal,
+    });
+    await handle.completion;
+
+    // After spawn, the child's model should be resolved through the dynamic
+    // provider map (built from child.modelProvider). Since the test harness
+    // registers 'mock-model' as 'test-provider', the resolver should pick it.
+    expect(child.agent.config.modelAlias).toBe('mock-model');
+  });
 });
 
 describe('Session resume permission parent chain', () => {
