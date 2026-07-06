@@ -48,23 +48,34 @@ describe('EditTool', () => {
     // response order; mismatched old_string fails explicitly.
     expect(tool.description).toContain('same-file edits in response order');
     expect(tool.description).toContain('old_string not found');
-    expect(tool.parameters).toMatchObject({
-      type: 'object',
-      properties: {
-        path: {
-          type: 'string',
-          description: expect.stringContaining('working directory'),
-        },
-        old_string: {
-          type: 'string',
-          description: expect.stringContaining('without the line-number prefix'),
-        },
-        new_string: {
-          type: 'string',
-          description: expect.stringContaining('same Read output view'),
-        },
-      },
+    // The schema is a union of string-replace and structural-mutation modes.
+    // The anyOf branch contains both variant schemas.
+    const params = tool.parameters as Record<string, unknown>;
+    const anyOf = params.anyOf as Array<Record<string, unknown>>;
+    expect(anyOf).toBeDefined();
+    expect(anyOf).toHaveLength(2);
+    // First variant: string-replace mode
+    const stringReplace = anyOf[0]!;
+    expect(stringReplace.type).toBe('object');
+    const srProps = stringReplace.properties as Record<string, unknown>;
+    expect(srProps.path).toMatchObject({
+      type: 'string',
+      description: expect.stringContaining('working directory'),
     });
+    expect(srProps.old_string).toMatchObject({
+      type: 'string',
+      description: expect.stringContaining('without the line-number prefix'),
+    });
+    expect(srProps.new_string).toMatchObject({
+      type: 'string',
+      description: expect.stringContaining('same Read output view'),
+    });
+    // Second variant: structural-mutation mode
+    const structMut = anyOf[1]!;
+    expect(structMut.type).toBe('object');
+    const smProps = structMut.properties as Record<string, unknown>;
+    expect(smProps.mutations).toBeDefined();
+    // Schema validation — string-replace mode
     expect(
       EditInputSchema.safeParse({
         path: '/tmp/a.txt',
@@ -79,6 +90,13 @@ describe('EditTool', () => {
         new_string: 'new',
       }).success,
     ).toBe(false);
+    // Schema validation — structural-mutation mode
+    expect(
+      EditInputSchema.safeParse({
+        path: '/tmp/a.txt',
+        mutations: [{ node_id: 'abc123', replacement: 'new code' }],
+      }).success,
+    ).toBe(true);
   });
 
   it('replaces a unique first occurrence and writes the updated content', async () => {

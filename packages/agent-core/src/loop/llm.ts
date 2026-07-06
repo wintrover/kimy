@@ -36,6 +36,7 @@ export interface LLMStreamTiming {
 export interface LLMChatParams {
   messages: Message[];
   tools: readonly Tool[];
+  forceToolChoice?: { type: 'tool'; name: string };
   signal: AbortSignal;
   requestLogFields?: LLMRequestLogFields;
   onTextDelta?: ((delta: string) => void) | undefined;

@@ -101,6 +101,10 @@ export interface RetryOrigin {
   readonly trigger?: string;
 }
 
+export interface AgentPhaseEscapeGuardOrigin {
+  readonly kind: 'agent_phase_escape_guard';
+}
+
 export type PromptOrigin =
   | UserPromptOrigin
   | SkillActivationOrigin
@@ -111,7 +115,8 @@ export type PromptOrigin =
   | CronJobOrigin
   | CronMissedOrigin
   | HookResultOrigin
-  | RetryOrigin;
+  | RetryOrigin
+  | AgentPhaseEscapeGuardOrigin;
 
 export type GoalStatus = 'active' | 'paused' | 'blocked' | 'complete';
 export type GoalActor = 'user' | 'model' | 'runtime' | 'system';
@@ -726,6 +731,10 @@ export const retryOriginSchema = z.object({
   trigger: z.string().optional(),
 }) satisfies z.ZodType<RetryOrigin>;
 
+export const agentPhaseEscapeGuardOriginSchema = z.object({
+  kind: z.literal('agent_phase_escape_guard'),
+}) satisfies z.ZodType<AgentPhaseEscapeGuardOrigin>;
+
 export const promptOriginSchema = z.discriminatedUnion('kind', [
   userPromptOriginSchema,
   skillActivationOriginSchema,
@@ -737,6 +746,7 @@ export const promptOriginSchema = z.discriminatedUnion('kind', [
   cronMissedOriginSchema,
   hookResultOriginSchema,
   retryOriginSchema,
+  agentPhaseEscapeGuardOriginSchema,
 ]) satisfies z.ZodType<PromptOrigin>;
 
 export const goalStatusSchema = z.enum(['active', 'paused', 'blocked', 'complete']) satisfies z.ZodType<GoalStatus>;

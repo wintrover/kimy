@@ -25,10 +25,46 @@ import type {
 
 export * from './types';
 
+// ── Phase 3/3.5/3.75 optional tool classes ────────────────────────
+// Lazy-loaded at module scope.  String-variable import() paths prevent
+// TypeScript from attempting static resolution at compile time; once
+// each module exports a BuiltinTool class, it will be picked up
+// automatically and registered in initializeBuiltinTools().
+
+type _LazyToolClass = new (...args: readonly unknown[]) => BuiltinTool;
+
+async function _loadToolClass(
+  modulePath: string,
+  exportName: string,
+): Promise<_LazyToolClass | undefined> {
+  try {
+    const mod = (await import(modulePath)) as Record<string, unknown>;
+    const cls = mod[exportName];
+    return typeof cls === 'function' ? (cls as _LazyToolClass) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+let _ContractValidatorClass: _LazyToolClass | undefined;
+let _Z3VerifyClass: _LazyToolClass | undefined;
+let _SketchSynthesizeClass: _LazyToolClass | undefined;
+
+void _loadToolClass('#/tools/hooks/contract-validator', 'ContractValidatorTool').then(
+  (cls) => { _ContractValidatorClass = cls; },
+);
+void _loadToolClass('#/tools/hooks/z3-verifier', 'Z3VerifyTool').then(
+  (cls) => { _Z3VerifyClass = cls; },
+);
+void _loadToolClass('#/tools/synthesis/sketch-assembler', 'SketchSynthesizeTool').then(
+  (cls) => { _SketchSynthesizeClass = cls; },
+);
+
 /** Tools the main agent must keep visible when swarm mode is active (orchestration / collaboration only). */
 const SWARM_COLLABORATION_TOOLS = new Set([
   'AgentSwarm', 'Agent', 'Skill', 'TodoList', 'CreateGoal', 'UpdateGoal',
   'EnterPlanMode', 'ExitPlanMode', 'AskUserQuestion',
+  'CommitAndPrepareSwarm',
   'CronCreate', 'CronDelete', 'CronList',
 ]);
 
@@ -414,6 +450,7 @@ export class ToolManager {
         new b.EditTool(kaos, workspace),
         new b.GrepTool(kaos, workspace),
         new b.GlobTool(kaos, workspace),
+        new b.SearchWorkspaceTool(kaos, workspace),
         new b.BashTool(kaos, cwd, background, {
           allowBackground,
         }),
@@ -449,8 +486,17 @@ export class ToolManager {
           ),
         this.agent.subagentHost &&
           new b.AgentSwarmTool(this.agent.subagentHost, this.agent.swarmMode),
+        this.agent.subagentHost &&
+          new b.CommitAndPrepareSwarmTool(this.agent),
         toolServices?.webSearcher && new b.WebSearchTool(toolServices.webSearcher),
         toolServices?.urlFetcher && new b.FetchURLTool(toolServices.urlFetcher),
+        new b.NimCheckTool(kaos, cwd),
+        // Phase 3/3.5/3.75 — lazy-loaded placeholder tools.
+        // Once the module exports a BuiltinTool class the variable will be
+        // populated and the tool will appear in the registry automatically.
+        _ContractValidatorClass && new _ContractValidatorClass(this.agent),
+        _Z3VerifyClass && new _Z3VerifyClass(this.agent),
+        _SketchSynthesizeClass && new _SketchSynthesizeClass(this.agent),
       ]
         .filter((tool) => !!tool)
         .map((tool) => [tool.name, tool] as const),
@@ -487,6 +533,25 @@ export class ToolManager {
     // Swarm mode: hide leaf tools, keep only orchestration/collaboration tools
     if (this.agent.swarmMode?.isActive) {
       names = names.filter((name) => SWARM_COLLABORATION_TOOLS.has(name));
+    }
+    // Planning Phase: hide AgentSwarm
+    if (this.agent.agentPhase?.current === 'planning') {
+      names = names.filter((name) => name !== 'AgentSwarm');
+    }
+    // Execution Phase: only AgentSwarm (prefilled wrapper)
+    if (this.agent.agentPhase?.isExecution) {
+      const pendingParams = this.agent.agentPhase.pendingSwarmParams;
+      if (pendingParams) {
+        const originalTool = this.builtinTools.get('AgentSwarm');
+        if (originalTool) {
+          return [{
+            ...originalTool,
+            parameters: { type: 'object', properties: {} },
+            resolveExecution: () => originalTool.resolveExecution(pendingParams),
+          }];
+        }
+      }
+      names = names.filter((name) => name === 'AgentSwarm');
     }
     return names
       .map(

@@ -66,6 +66,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<Execut
     recordUsage,
   } = deps;
 
+  let forceToolChoice: LLMChatParams['forceToolChoice'];
   if (hooks?.beforeStep !== undefined) {
     const beforeStep = await hooks.beforeStep({
       turnId,
@@ -76,6 +77,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<Execut
     if (beforeStep?.block === true) {
       throw new Error(beforeStep.reason ?? `Step ${String(currentStep)} was blocked`);
     }
+    forceToolChoice = beforeStep?.forceToolChoice;
   }
 
   signal.throwIfAborted();
@@ -108,6 +110,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<Execut
     messages,
     tools: tools ?? [],
     signal,
+    forceToolChoice,
     ...createChatStreamingCallbacks({
       dispatchEvent,
       turnId,

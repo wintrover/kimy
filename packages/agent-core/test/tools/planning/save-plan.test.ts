@@ -27,6 +27,7 @@ function makeAgent(
       get isActive() { return input.active ?? false; },
       get planFilePath() { return input.planFilePath ?? null; },
       get plansDir() { return input.plansDir ?? '/workspace/plans'; },
+      markPlanSaved: vi.fn(),
     },
     kaos: { writeText },
   } as unknown as Agent;

@@ -107,6 +107,20 @@ export interface GenerateOptions {
    * drained, before post-processing the assembled response.
    */
   onStreamEnd?: () => void;
+  /**
+   * Provider passthrough for tool_choice. The exact shape is
+   * provider-specific; adapters that do not support it ignore this field.
+   */
+  tool_choice?:
+    | { type: 'tool'; name: string }
+    | { type: 'any' }
+    | { type: 'auto' };
+  /**
+   * OpenAI-specific cache key for prompt caching. When set, OpenAI providers
+   * forward this as `prompt_cache_key` in the API request, enabling prefix
+   * caching across requests with the same key.
+   */
+  prompt_cache_key?: string;
 }
 
 /**

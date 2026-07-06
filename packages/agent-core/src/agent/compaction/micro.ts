@@ -2,6 +2,7 @@ import type { ContentPart } from '@moonshot-ai/kosong';
 
 import type { Agent } from '..';
 import type { ContextMessage } from '../context';
+import { toFixedPoint, fpLt } from '../fixed-point';
 import {
   estimateTokensForContentParts,
   estimateTokensForMessages,
@@ -59,9 +60,9 @@ export class MicroCompaction {
     const contextTokens = this.agent.context.tokenCountWithPending;
     const contextUsageRatio =
       maxContextTokens !== undefined && maxContextTokens > 0
-        ? contextTokens / maxContextTokens
-        : 1;
-    if (contextUsageRatio < config.minContextUsageRatio) return;
+        ? toFixedPoint(contextTokens, maxContextTokens)
+        : 400;
+    if (fpLt(contextUsageRatio, config.minContextUsageRatio * 100)) return;
 
     const previousCutoff = this.cutoff;
     const nextCutoff = Math.max(0, history.length - config.keepRecentMessages);

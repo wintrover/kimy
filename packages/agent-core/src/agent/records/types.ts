@@ -102,6 +102,13 @@ export interface AgentRecordEvents {
     actor?: GoalActor;
   };
   'goal.clear': {};
+
+  'snapshot.checkpoint': {
+    readonly epoch: number;
+    readonly wireRecordCount: number;
+    readonly snapshotFile: string;
+    readonly sha256: string;
+  };
 }
 
 export type AgentRecord = {

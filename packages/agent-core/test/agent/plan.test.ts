@@ -1,6 +1,7 @@
 import type { ToolCall } from '@moonshot-ai/kosong';
 import { describe, expect, it, vi } from 'vitest';
 
+import { PlanMode, PlanTransition, PlanTransitionState } from '../../src/agent/plan';
 import { createFakeKaos } from '../tools/fixtures/fake-kaos';
 import { createCommandKaos, testAgent } from './harness/agent';
 
@@ -743,6 +744,460 @@ describe('plan write retry', () => {
     await expect((ctx.agent.planMode as any).writePlanWithRetry('plan content')).rejects.toThrow(
       'too many collisions',
     );
+  });
+});
+
+describe('plan transition state machine', () => {
+  describe('transitionState lifecycle', () => {
+    it('starts in idle state', () => {
+      const ctx = testAgent();
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.IDLE);
+    });
+
+    it('markPlanSaved transitions to plan_saved', () => {
+      const ctx = testAgent();
+      ctx.agent.planMode.markPlanSaved('test-source');
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.PLAN_SAVED);
+    });
+
+    it('clearTransitionState resets to idle', () => {
+      const ctx = testAgent();
+      ctx.agent.planMode.markPlanSaved('test-source');
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.PLAN_SAVED);
+
+      ctx.agent.planMode.clearTransitionState(PlanTransition.PLAN_SAVED_TO_IDLE, 'test-clear');
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.IDLE);
+    });
+
+    it('incrementResumeAttempts increments and returns the count', () => {
+      const ctx = testAgent();
+      ctx.agent.planMode.markPlanSaved('test-source');
+
+      expect(ctx.agent.planMode.incrementResumeAttempts()).toBe(1);
+      expect(ctx.agent.planMode.incrementResumeAttempts()).toBe(2);
+      expect(ctx.agent.planMode.incrementResumeAttempts()).toBe(3);
+    });
+
+    it('MAX_PLAN_RESUME_ATTEMPTS is 2', () => {
+      expect(PlanMode.MAX_PLAN_RESUME_ATTEMPTS).toBe(2);
+    });
+
+    it('markPlanSaved resets resume attempts to 0', () => {
+      const ctx = testAgent();
+      ctx.agent.planMode.markPlanSaved('test-source');
+
+      ctx.agent.planMode.incrementResumeAttempts();
+      ctx.agent.planMode.incrementResumeAttempts();
+      // markPlanSaved resets attempts
+      ctx.agent.planMode.markPlanSaved('test-source-again');
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.PLAN_SAVED);
+      // After reset, first increment should return 1
+      expect(ctx.agent.planMode.incrementResumeAttempts()).toBe(1);
+    });
+
+    it('clearTransitionState resets resume attempts to 0', () => {
+      const ctx = testAgent();
+      ctx.agent.planMode.markPlanSaved('test-source');
+
+      ctx.agent.planMode.incrementResumeAttempts();
+      ctx.agent.planMode.incrementResumeAttempts();
+      ctx.agent.planMode.clearTransitionState(PlanTransition.PLAN_SAVED_TO_IDLE, 'test');
+      // After clear, first increment should return 1
+      expect(ctx.agent.planMode.incrementResumeAttempts()).toBe(1);
+    });
+  });
+
+  describe('SavePlan → plan_saved', () => {
+    it('sets transitionState to plan_saved after successful save', async () => {
+      const files = new Map<string, string>();
+      const writeText = vi.fn(async (path: string, content: string) => {
+        files.set(path, content);
+        return content.length;
+      });
+      const ctx = testAgent({
+        kaos: createPlanKaos({ writeText }),
+      });
+      ctx.configure({ tools: ['SavePlan'] });
+      await ctx.rpc.setPermission({ mode: 'yolo' });
+      await ctx.agent.planMode.enter('transition-save', false);
+
+      const planPath = ctx.agent.planMode.planFilePath;
+      if (planPath === null) throw new Error('expected active plan path');
+
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.IDLE);
+
+      const savePlanCall: ToolCall = {
+        type: 'function',
+        id: 'call_save_plan',
+        name: 'SavePlan',
+        arguments: JSON.stringify({ content: '# Plan\n\n- Step 1\n- Step 2' }),
+      };
+      ctx.mockNextResponse(
+        { type: 'text', text: 'I will save the plan.' },
+        savePlanCall,
+      );
+      ctx.mockNextResponse({ type: 'text', text: 'Plan saved successfully.' });
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Save my plan' }] });
+
+      await ctx.untilTurnEnd();
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.PLAN_SAVED);
+      expect(files.get(planPath)).toBe('# Plan\n\n- Step 1\n- Step 2');
+      await ctx.expectResumeMatches();
+    });
+  });
+
+  describe('ExitPlanMode → idle', () => {
+    it('clears transitionState on successful exit', async () => {
+      const files = new Map<string, string>();
+      const readText = vi.fn(async (path: string) => files.get(path) ?? '');
+      const ctx = testAgent({
+        kaos: createPlanKaos({ readText }),
+      });
+      ctx.configure({ tools: ['ExitPlanMode'] });
+      await ctx.rpc.setPermission({ mode: 'auto' });
+      await ctx.agent.planMode.enter('transition-exit', false);
+
+      const planPath = ctx.agent.planMode.planFilePath;
+      if (planPath === null) throw new Error('expected active plan path');
+      files.set(planPath, '# Plan\n\n- Step 1');
+
+      // Manually mark plan as saved to set transition state
+      ctx.agent.planMode.markPlanSaved('test-setup');
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.PLAN_SAVED);
+
+      const exitPlanModeCall: ToolCall = {
+        type: 'function',
+        id: 'call_exit_plan',
+        name: 'ExitPlanMode',
+        arguments: '{}',
+      };
+      ctx.mockNextResponse({ type: 'text', text: 'I will exit plan mode.' }, exitPlanModeCall);
+      ctx.mockNextResponse({ type: 'text', text: 'Plan mode exited.' });
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Exit plan mode' }] });
+
+      await ctx.untilTurnEnd();
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.IDLE);
+      expect(ctx.agent.planMode.isActive).toBe(false);
+      await ctx.expectResumeMatches();
+    });
+
+    it('surfaces readText error as tool result without resetting transitionState', async () => {
+      const readText = vi.fn(async () => {
+        throw Object.assign(new Error('EIO'), { code: 'EIO' });
+      });
+      const ctx = testAgent({
+        kaos: createPlanKaos({ readText }),
+      });
+      ctx.configure({ tools: ['ExitPlanMode'] });
+      await ctx.rpc.setPermission({ mode: 'yolo' });
+      await ctx.agent.planMode.enter('transition-error', false);
+
+      // Manually mark plan as saved
+      ctx.agent.planMode.markPlanSaved('test-setup');
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.PLAN_SAVED);
+
+      const exitPlanModeCall: ToolCall = {
+        type: 'function',
+        id: 'call_exit_error',
+        name: 'ExitPlanMode',
+        arguments: '{}',
+      };
+      ctx.mockNextResponse(
+        { type: 'text', text: 'I will exit plan mode.' },
+        exitPlanModeCall,
+      );
+      ctx.mockNextResponse({ type: 'text', text: 'Something went wrong.' });
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Exit plan mode' }] });
+
+      await ctx.untilTurnEnd();
+      // resolvePlan() catches readText error internally and returns a tool error,
+      // so the outer safety catch never fires; transitionState remains plan_saved
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.PLAN_SAVED);
+      // Plan mode should still be active (exit failed)
+      expect(ctx.agent.planMode.isActive).toBe(true);
+      // The error should be surfaced in the tool result
+      expect(toolResultText(ctx.llmCalls[1]!.history)).toContain('Failed to read plan file');
+      await ctx.expectResumeMatches();
+    });
+  });
+
+  describe('shouldContinueAfterStop plan invariant', () => {
+    it('micro-resumes when model ends turn with plan_saved and stopReason end_turn', async () => {
+      const files = new Map<string, string>();
+      const readText = vi.fn(async (path: string) => files.get(path) ?? '');
+      const ctx = testAgent({
+        kaos: createPlanKaos({ readText }),
+      });
+      ctx.configure({ tools: ['ExitPlanMode'] });
+      await ctx.rpc.setPermission({ mode: 'auto' });
+      await ctx.agent.planMode.enter('resume-test', false);
+
+      const planPath = ctx.agent.planMode.planFilePath;
+      if (planPath === null) throw new Error('expected active plan path');
+      files.set(planPath, '# Plan\n\n- Step 1');
+
+      // Manually mark plan as saved to simulate SavePlan having been called
+      ctx.agent.planMode.markPlanSaved('test-setup');
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.PLAN_SAVED);
+
+      // Mock LLM response 1: text + end_turn (model "forgets" ExitPlanMode)
+      // shouldContinueAfterStop should detect plan_saved and continue
+      const exitPlanModeCall: ToolCall = {
+        type: 'function',
+        id: 'call_exit_resume',
+        name: 'ExitPlanMode',
+        arguments: '{}',
+      };
+      ctx.mockNextResponse({ type: 'text', text: 'Plan looks good.' });
+      // Mock LLM response 2: ExitPlanMode tool call (micro-resume worked)
+      ctx.mockNextResponse({ type: 'text', text: 'Exiting now.' }, exitPlanModeCall);
+      ctx.mockNextResponse({ type: 'text', text: 'Done.' });
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Review the plan' }] });
+
+      await ctx.untilTurnEnd();
+      // The model should have been called at least twice (original + micro-resume)
+      expect(ctx.llmCalls.length).toBeGreaterThanOrEqual(2);
+      // After ExitPlanMode, transitionState should be idle
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.IDLE);
+      expect(ctx.agent.planMode.isActive).toBe(false);
+      await ctx.expectResumeMatches();
+    });
+
+    it('force-resets after MAX_PLAN_RESUME_ATTEMPTS exceeded', async () => {
+      const ctx = testAgent();
+      ctx.configure();
+      await ctx.agent.planMode.enter('max-attempts-test', false);
+
+      // Manually mark plan as saved
+      ctx.agent.planMode.markPlanSaved('test-setup');
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.PLAN_SAVED);
+
+      // Mock 3 LLM responses, all text + end_turn (model never calls ExitPlanMode)
+      // Attempt 1: 1 > 2? No → continue
+      // Attempt 2: 2 > 2? No → continue
+      // Attempt 3: 3 > 2? Yes → force reset, stop
+      ctx.mockNextResponse({ type: 'text', text: 'Response 1.' });
+      ctx.mockNextResponse({ type: 'text', text: 'Response 2.' });
+      ctx.mockNextResponse({ type: 'text', text: 'Response 3.' });
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Review plan' }] });
+
+      await ctx.untilTurnEnd();
+      // All 3 LLM calls should have been made
+      expect(ctx.llmCalls).toHaveLength(3);
+      // After max attempts, transitionState should be force-reset to idle
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.IDLE);
+      // Plan mode should still be active (only the transition state was reset)
+      expect(ctx.agent.planMode.isActive).toBe(true);
+      await ctx.expectResumeMatches();
+    });
+  });
+
+  describe('beforeStep forceToolChoice', () => {
+    it('returns forceToolChoice when transitionState is plan_saved', async () => {
+      const files = new Map<string, string>();
+      const readText = vi.fn(async (path: string) => files.get(path) ?? '');
+      const ctx = testAgent({
+        kaos: createPlanKaos({ readText }),
+      });
+      ctx.configure({ tools: ['ExitPlanMode'] });
+      await ctx.rpc.setPermission({ mode: 'auto' });
+      await ctx.agent.planMode.enter('force-tool-choice', false);
+
+      const planPath = ctx.agent.planMode.planFilePath;
+      if (planPath === null) throw new Error('expected active plan path');
+      files.set(planPath, '# Plan\n\n- Step 1');
+
+      // Mark plan as saved so beforeStep returns forceToolChoice
+      ctx.agent.planMode.markPlanSaved('test-setup');
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.PLAN_SAVED);
+
+      // The model is "forced" to call ExitPlanMode by the beforeStep hook
+      const exitPlanModeCall: ToolCall = {
+        type: 'function',
+        id: 'call_exit_forced',
+        name: 'ExitPlanMode',
+        arguments: '{}',
+      };
+      ctx.mockNextResponse({ type: 'text', text: 'Exiting plan mode.' }, exitPlanModeCall);
+      ctx.mockNextResponse({ type: 'text', text: 'Done.' });
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Finish plan' }] });
+
+      await ctx.untilTurnEnd();
+      // ExitPlanMode should have been called
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.IDLE);
+      expect(ctx.agent.planMode.isActive).toBe(false);
+      await ctx.expectResumeMatches();
+    });
+
+    it('does not set forceToolChoice when transitionState is idle', async () => {
+      const ctx = testAgent();
+      ctx.configure();
+      await ctx.agent.planMode.enter('no-force-tool-choice', false);
+
+      // transitionState should be idle
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.IDLE);
+
+      // Model returns normal text + end_turn, no forceToolChoice干预
+      ctx.mockNextResponse({ type: 'text', text: 'Normal response.' });
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Hello' }] });
+
+      await ctx.untilTurnEnd();
+      // Only 1 LLM call (no micro-resume since state is idle)
+      expect(ctx.llmCalls).toHaveLength(1);
+      // transitionState should still be idle
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.IDLE);
+      await ctx.expectResumeMatches();
+    });
+  });
+
+  describe('exit() transitionState invariant', () => {
+    it('exit() clears transitionState when plan_saved', () => {
+      const ctx = testAgent();
+      ctx.agent.planMode.markPlanSaved('test');
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.PLAN_SAVED);
+
+      ctx.agent.planMode.exit();
+
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.IDLE);
+    });
+
+    it('exit() is idempotent', () => {
+      const ctx = testAgent();
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.IDLE);
+
+      expect(() => ctx.agent.planMode.exit()).not.toThrow();
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.IDLE);
+
+      expect(() => ctx.agent.planMode.exit()).not.toThrow();
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.IDLE);
+    });
+
+    it('exit() clears transitionState even when logRecord throws', () => {
+      const ctx = testAgent();
+      vi.spyOn(ctx.agent.records, 'logRecord').mockImplementation(() => {
+        throw new Error('logRecord boom');
+      });
+      ctx.agent.planMode.markPlanSaved('test');
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.PLAN_SAVED);
+
+      // logRecord throws and exit() propagates the error, but the finally block
+      // still enforces the invariant — state is cleared regardless
+      try {
+        ctx.agent.planMode.exit();
+      } catch {
+        // expected — logRecord error propagates from the try block
+      }
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.IDLE);
+    });
+
+    it('exit() clears transitionState even when emitTransition throws', () => {
+      const ctx = testAgent();
+      ctx.agent.planMode.markPlanSaved('test');
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.PLAN_SAVED);
+
+      // Mock log.info to throw so that emitTransition (called from clearTransitionState)
+      // throws during the finally block — set up AFTER markPlanSaved to avoid breaking it
+      const originalLog = ctx.agent.log;
+      let logInfoSpy: ReturnType<typeof vi.spyOn> | undefined;
+      if (originalLog !== null && originalLog !== undefined && typeof originalLog === 'object' && 'info' in originalLog) {
+        logInfoSpy = vi.spyOn(originalLog as { info: (...args: unknown[]) => void }, 'info').mockImplementation(() => {
+          throw new Error('emitTransition boom');
+        });
+      }
+
+      try {
+        ctx.agent.planMode.exit();
+      } finally {
+        logInfoSpy?.mockRestore();
+      }
+
+      // emitTransition throws inside clearTransitionState, but the inner try-catch
+      // in exit()'s finally block catches it and directly assigns IDLE
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.IDLE);
+    });
+
+    it('shouldContinueAfterStop does not fire micro-resume after exit()', () => {
+      const ctx = testAgent();
+      ctx.agent.planMode.markPlanSaved('test');
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.PLAN_SAVED);
+
+      ctx.agent.planMode.exit();
+      // After exit(), transitionState must be IDLE, which means the
+      // shouldContinueAfterStop hook (which checks for PLAN_SAVED) will not fire
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.IDLE);
+      expect(ctx.agent.planMode.isActive).toBe(false);
+    });
+
+    it('cancel() clears transitionState when plan_saved', () => {
+      const ctx = testAgent();
+      ctx.agent.planMode.enter();
+      ctx.agent.planMode.markPlanSaved('test');
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.PLAN_SAVED);
+      ctx.agent.planMode.cancel();
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.IDLE);
+    });
+
+    it('cancel() is idempotent when transitionState already idle', () => {
+      const ctx = testAgent();
+      ctx.agent.planMode.enter();
+      ctx.agent.planMode.cancel();
+      expect(() => ctx.agent.planMode.cancel()).not.toThrow();
+      expect(ctx.agent.planMode.transitionState).toBe(PlanTransitionState.IDLE);
+    });
+  });
+});
+
+describe('enter() post-await guard', () => {
+  it('skips logRecord when exit() called during ensurePlanDirectory', async () => {
+    let resolveMkdir: (value: void) => void;
+    const mkdirPromise = new Promise<void>((resolve) => {
+      resolveMkdir = resolve;
+    });
+
+    const kaos = createPlanKaos({
+      mkdir: vi.fn().mockReturnValue(mkdirPromise),
+    });
+    const ctx = testAgent({ kaos });
+
+    // enter() starts — pauses at ensurePlanDirectory
+    const enterPromise = ctx.agent.planMode.enter('test-plan', false, false);
+
+    // drain microtask queue, then call exit()
+    await new Promise((r) => setTimeout(r, 0));
+    ctx.agent.planMode.exit();
+
+    // complete mkdir
+    resolveMkdir!();
+    await enterPromise;
+
+    // enter() should have returned early → plan mode inactive
+    expect(ctx.agent.planMode.isActive).toBe(false);
+  });
+
+  it('stops after mkdir when exit() called before writeEmptyPlanFile', async () => {
+    let resolveWrite: (value: void) => void;
+    const writePromise = new Promise<void>((resolve) => {
+      resolveWrite = resolve;
+    });
+
+    const kaos = createPlanKaos({
+      mkdir: vi.fn().mockResolvedValue(undefined),
+      writeText: vi.fn().mockReturnValue(writePromise),
+    });
+    const ctx = testAgent({ kaos });
+
+    // createFile=true to trigger writeEmptyPlanFile
+    const enterPromise = ctx.agent.planMode.enter('test-plan', true, false);
+
+    // ensurePlanDirectory completes, then pause at writeEmptyPlanFile → exit()
+    await new Promise((r) => setTimeout(r, 0));
+    ctx.agent.planMode.exit();
+
+    // complete write
+    resolveWrite!();
+    await enterPromise;
+
+    expect(ctx.agent.planMode.isActive).toBe(false);
   });
 });
 

@@ -46,6 +46,7 @@ import { ReplayBuilder, type ReplayBuilderOptions } from './replay';
 import { SkillManager } from './skill';
 import type { SkillRegistry } from './skill/types';
 import { SwarmMode } from './swarm';
+import { AgentPhase } from './phase';
 import { ToolManager } from './tool/index';
 import { TurnFlow } from './turn';
 import { KosongLLM } from './turn/kosong-llm';
@@ -86,6 +87,11 @@ export interface AgentOptions {
   readonly experimentalFlags?: ExperimentalFlagResolver;
   readonly replay?: ReplayBuilderOptions;
   readonly additionalDirs?: readonly string[];
+  /**
+   * Optional session identifier used to derive an OpenAI `prompt_cache_key`
+   * for prefix caching across requests within the same session.
+   */
+  readonly sessionId?: string;
 }
 
 export class Agent {
@@ -124,6 +130,7 @@ export class Agent {
   readonly planMode: PlanMode;
   parentPlanModeActive = false;
   readonly swarmMode: SwarmMode;
+  readonly agentPhase: AgentPhase;
   readonly usage: UsageRecorder;
   readonly skills: SkillManager | null;
   readonly tools: ToolManager;
@@ -134,6 +141,7 @@ export class Agent {
   readonly projection: ContextProjection;
 
   private additionalDirs: readonly string[];
+  private readonly _sessionId: string | undefined;
   private readonly _providerCache = new Map<string, ChatProvider>();
 
   constructor(options: AgentOptions) {
@@ -154,6 +162,7 @@ export class Agent {
     this.telemetry = options.telemetry ?? noopTelemetryClient;
     this.experimentalFlags = options.experimentalFlags ?? new FlagResolver();
     this.additionalDirs = normalizeAdditionalDirs(options.additionalDirs ?? []);
+    this._sessionId = options.sessionId;
 
     this.llmRequestLogger = new LlmRequestLogger(this.log);
     this.blobStore = options.homedir
@@ -181,6 +190,7 @@ export class Agent {
     this.permission = new PermissionManager(this, options.permission);
     this.planMode = new PlanMode(this, this.planDir);
     this.swarmMode = new SwarmMode(this);
+    this.agentPhase = new AgentPhase(this);
     this.usage = new UsageRecorder(this);
     this.skills = options.skills ? new SkillManager(this, options.skills) : null;
     this.tools = new ToolManager(this);
@@ -254,6 +264,7 @@ export class Agent {
       capability: this.config.modelCapabilities,
       generate: this.generate,
       completionBudgetConfig,
+      sessionId: this._sessionId,
     });
   }
 
@@ -313,6 +324,7 @@ export class Agent {
       capability: resolved.modelCapabilities,
       generate: this.generate,
       completionBudgetConfig,
+      sessionId: this._sessionId,
     });
   }
 

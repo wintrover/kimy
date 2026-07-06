@@ -1,0 +1,16 @@
+{
+  "name": "nim-agent-core-addon",
+  "version": "0.1.0",
+  "description": "N-API native addon for agent-core (Nim-generated)",
+  "main": "build/Release/nim_agent_core.node",
+  "scripts": {
+    "build": "node-gyp rebuild",
+    "clean": "node-gyp clean"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

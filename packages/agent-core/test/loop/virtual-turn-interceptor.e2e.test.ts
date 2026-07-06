@@ -49,6 +49,32 @@ class AgentSwarmTool implements ExecutableTool {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Fixture: a tool named 'CommitAndPrepareSwarm' for the new tests.  */
+/* ------------------------------------------------------------------ */
+
+class CommitAndPrepareSwarmTool implements ExecutableTool {
+  readonly name = 'CommitAndPrepareSwarm';
+  readonly description = 'Fake commit-and-prepare-swarm tool for testing.';
+  readonly parameters = { type: 'object', properties: {}, additionalProperties: true };
+
+  readonly calls: string[] = [];
+
+  validateArgs(args: unknown) {
+    return { success: true as const, data: args };
+  }
+
+  resolveExecution(): ToolExecution {
+    return {
+      approvalRule: this.name,
+      execute: async (ctx): Promise<ExecutableToolResult> => {
+        this.calls.push(ctx.toolCallId);
+        return { output: 'committed and prepared' };
+      },
+    };
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Helper: build a shouldContinueAfterStop hook that handles the      */
 /*  virtual-turn retry exactly like TurnFlow does.                     */
 /* ------------------------------------------------------------------ */
@@ -231,5 +257,89 @@ describe('runTurn — virtual-turn interceptor', () => {
     // Only 1 LLM call — the turn stopped after the intercepted batch
     expect(llm.callCount).toBe(1);
     expect(result.steps).toBe(1);
+  });
+
+  it('suppresses execution for a mixed CommitAndPrepareSwarm + leaf batch', async () => {
+    const commitSwarm = new CommitAndPrepareSwarmTool();
+    const echo = new EchoTool();
+    const { hook } = createVirtualTurnHook();
+
+    const { context, llm, result } = await runTurn({
+      tools: [commitSwarm, echo],
+      hooks: { shouldContinueAfterStop: hook },
+      responses: [
+        makeToolUseResponse([
+          makeToolCall('CommitAndPrepareSwarm', { prompt: 'commit stuff' }, 'tc-commit'),
+          makeToolCall('echo', { text: 'hi' }, 'tc-echo'),
+        ]),
+        makeEndTurnResponse('corrected'),
+      ],
+    });
+
+    expect(commitSwarm.calls.length).toBe(0);
+    expect(echo.calls.length).toBe(0);
+
+    const toolCalls = context.toolCalls();
+    const toolResults = context.toolResults();
+    expect(toolCalls.length).toBe(2);
+    expect(toolResults.length).toBe(2);
+
+    for (const tr of toolResults) {
+      expect(tr.result.isError).toBe(true);
+    }
+
+    expect(llm.callCount).toBe(2);
+    expect(result.steps).toBe(2);
+  });
+
+  it('does not intercept a batch that contains only CommitAndPrepareSwarm', async () => {
+    const commitSwarm = new CommitAndPrepareSwarmTool();
+
+    const { llm } = await runTurn({
+      tools: [commitSwarm],
+      responses: [
+        makeToolUseResponse([
+          makeToolCall('CommitAndPrepareSwarm', { prompt: 'commit' }, 'tc-commit'),
+        ]),
+        makeEndTurnResponse('done'),
+      ],
+    });
+
+    expect(commitSwarm.calls.length).toBe(1);
+    expect(commitSwarm.calls[0]).toBe('tc-commit');
+    expect(llm.callCount).toBe(2);
+  });
+
+  it('intercepts a batch containing both AgentSwarm and CommitAndPrepareSwarm with a leaf tool', async () => {
+    const swarm = new AgentSwarmTool();
+    const commitSwarm = new CommitAndPrepareSwarmTool();
+    const echo = new EchoTool();
+    const { hook } = createVirtualTurnHook();
+
+    const { context, llm, result } = await runTurn({
+      tools: [swarm, commitSwarm, echo],
+      hooks: { shouldContinueAfterStop: hook },
+      responses: [
+        makeToolUseResponse([
+          makeToolCall('AgentSwarm', { prompt: 'swarm' }, 'tc-swarm'),
+          makeToolCall('CommitAndPrepareSwarm', { prompt: 'commit' }, 'tc-commit'),
+          makeToolCall('echo', { text: 'leaf' }, 'tc-echo'),
+        ]),
+        makeEndTurnResponse('corrected'),
+      ],
+    });
+
+    expect(swarm.calls.length).toBe(0);
+    expect(commitSwarm.calls.length).toBe(0);
+    expect(echo.calls.length).toBe(0);
+
+    const toolResults = context.toolResults();
+    expect(toolResults.length).toBe(3);
+    for (const tr of toolResults) {
+      expect(tr.result.isError).toBe(true);
+    }
+
+    expect(llm.callCount).toBe(2);
+    expect(result.steps).toBe(2);
   });
 });

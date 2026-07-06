@@ -20,6 +20,22 @@ export const FLAG_DEFINITIONS = [
     default: true,
     surface: 'core',
   },
+  {
+    id: 'semantic_compaction',
+    title: 'Semantic compaction',
+    description: 'Compress Glob results into a deterministic tree structure to reduce context window usage.',
+    env: 'KIMI_CODE_EXPERIMENTAL_SEMANTIC_COMPACTION',
+    default: false,
+    surface: 'core',
+  },
+  {
+    id: 'contract_injection',
+    title: 'Contract injection',
+    description: 'Inject AgentContract constitutional-level bindings from the Symbol Dependency Graph into the system prompt.',
+    env: 'KIMI_CODE_EXPERIMENTAL_CONTRACT_INJECTION',
+    default: false,
+    surface: 'core',
+  },
 ] as const satisfies readonly FlagDefinitionInput[];
 
 /** Literal union of registered flag ids. */

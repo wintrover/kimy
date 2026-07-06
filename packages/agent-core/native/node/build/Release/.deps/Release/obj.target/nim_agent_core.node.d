@@ -1,0 +1,1 @@
+cmd_Release/obj.target/nim_agent_core.node := g++ -o Release/obj.target/nim_agent_core.node -shared -pthread -rdynamic -m64  -Wl,-soname=nim_agent_core.node -Wl,--start-group Release/obj.target/nim_agent_core/nim_agent_core.o -Wl,--end-group -Wl,-rpath,'$$ORIGIN' -L../../nim -lagent_core

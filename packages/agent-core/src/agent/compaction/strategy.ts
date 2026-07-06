@@ -2,6 +2,7 @@ import type { Message } from "@moonshot-ai/kosong";
 import { estimateTokensForMessage, estimateTokensForMessages } from "../../utils/tokens";
 import { getPruneTemplate } from './prune-templates';
 import type { CompactionSource } from "./types";
+import { intCeilMulDiv } from '../fixed-point';
 
 export interface CompactionConfig {
   triggerRatio: number;
@@ -11,7 +12,8 @@ export interface CompactionConfig {
   maxRecentMessages: number;
   maxRecentUserMessages: number;
   maxRecentSizeRatio: number;
-  minOverflowReductionRatio: number;
+  minOverflowReductionNum: number;
+  minOverflowReductionDenom: number;
 }
 
 export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
@@ -22,7 +24,8 @@ export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
   maxRecentMessages: 6,
   maxRecentUserMessages: Infinity,
   maxRecentSizeRatio: 0.2,
-  minOverflowReductionRatio: 0.05,
+  minOverflowReductionNum: 1,
+  minOverflowReductionDenom: 20,
 };
 
 export interface CompactionStrategy {
@@ -127,7 +130,7 @@ export class DefaultCompactionStrategy implements CompactionStrategy {
   reduceCompactOnOverflow(messages: readonly Message[]): number {
     const minReducedSize = Math.max(
       1,
-      Math.ceil(this.maxSize * this.config.minOverflowReductionRatio),
+      intCeilMulDiv(this.maxSize, this.config.minOverflowReductionNum, this.config.minOverflowReductionDenom),
     );
     let reducedSize = 0;
     let bestN: number | undefined;

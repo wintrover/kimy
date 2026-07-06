@@ -1,0 +1,63 @@
+{
+  "cacheVersion": "D20240927T193831",
+  "outputFile": "/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/build/libagent_core.so",
+  "outputLastModificationTime": "",
+  "compile": [
+    [
+      "/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@psystem@sexceptions.nim.c",
+      "gcc -c  -w -fmax-errors=3 -fno-strict-aliasing -pthread  -fPIC  -I/home/wintrover/.choosenim/toolchains/nim-2.2.10/lib -I/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/src -o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@psystem@sexceptions.nim.c.o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@psystem@sexceptions.nim.c"
+    ],
+    [
+      "/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@pstd@sprivate@sdigitsutils.nim.c",
+      "gcc -c  -w -fmax-errors=3 -fno-strict-aliasing -pthread  -fPIC  -I/home/wintrover/.choosenim/toolchains/nim-2.2.10/lib -I/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/src -o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@pstd@sprivate@sdigitsutils.nim.c.o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@pstd@sprivate@sdigitsutils.nim.c"
+    ],
+    [
+      "/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@psystem@sdollars.nim.c",
+      "gcc -c  -w -fmax-errors=3 -fno-strict-aliasing -pthread  -fPIC  -I/home/wintrover/.choosenim/toolchains/nim-2.2.10/lib -I/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/src -o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@psystem@sdollars.nim.c.o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@psystem@sdollars.nim.c"
+    ],
+    [
+      "/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@pstd@stypedthreads.nim.c",
+      "gcc -c  -w -fmax-errors=3 -fno-strict-aliasing -pthread  -fPIC  -I/home/wintrover/.choosenim/toolchains/nim-2.2.10/lib -I/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/src -o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@pstd@stypedthreads.nim.c.o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@pstd@stypedthreads.nim.c"
+    ],
+    [
+      "/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@psystem.nim.c",
+      "gcc -c  -w -fmax-errors=3 -fno-strict-aliasing -pthread  -fPIC  -I/home/wintrover/.choosenim/toolchains/nim-2.2.10/lib -I/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/src -o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@psystem.nim.c.o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@psystem.nim.c"
+    ],
+    [
+      "/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@mcost_pure.nim.c",
+      "gcc -c  -w -fmax-errors=3 -fno-strict-aliasing -pthread  -fPIC  -I/home/wintrover/.choosenim/toolchains/nim-2.2.10/lib -I/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/src -o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@mcost_pure.nim.c.o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@mcost_pure.nim.c"
+    ],
+    [
+      "/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@msnapshot.nim.c",
+      "gcc -c  -w -fmax-errors=3 -fno-strict-aliasing -pthread  -fPIC  -I/home/wintrover/.choosenim/toolchains/nim-2.2.10/lib -I/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/src -o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@msnapshot.nim.c.o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@msnapshot.nim.c"
+    ],
+    [
+      "/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@magent_core.nim.c",
+      "gcc -c  -w -fmax-errors=3 -fno-strict-aliasing -pthread  -fPIC  -I/home/wintrover/.choosenim/toolchains/nim-2.2.10/lib -I/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/src -o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@magent_core.nim.c.o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@magent_core.nim.c"
+    ]
+  ],
+  "link": [
+    "/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@psystem@sexceptions.nim.c.o",
+    "/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@pstd@sprivate@sdigitsutils.nim.c.o",
+    "/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@psystem@sdollars.nim.c.o",
+    "/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@pstd@stypedthreads.nim.c.o",
+    "/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@psystem.nim.c.o",
+    "/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@mcost_pure.nim.c.o",
+    "/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@msnapshot.nim.c.o",
+    "/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@magent_core.nim.c.o"
+  ],
+  "linkcmd": "gcc   -shared -o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/build/libagent_core.so /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@psystem@sexceptions.nim.c.o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@pstd@sprivate@sdigitsutils.nim.c.o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@psystem@sdollars.nim.c.o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@pstd@stypedthreads.nim.c.o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@psystem.nim.c.o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@mcost_pure.nim.c.o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@msnapshot.nim.c.o /home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/.nimcache/@magent_core.nim.c.o  -pthread -pthread   -ldl",
+  "extraCmds": [],
+  "configFiles": [
+    "/home/wintrover/.choosenim/toolchains/nim-2.2.10/config/nim.cfg",
+    "/home/wintrover/.choosenim/toolchains/nim-2.2.10/config/config.nims",
+    "/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim/nim.cfg"
+  ],
+  "stdinInput": false,
+  "projectIsCmd": false,
+  "cmdInput": "",
+  "currentDir": "/home/wintrover/.kimi-code/src/kimi-code/packages/agent-core/native/nim",
+  "cmdline": "",
+  "depfiles": [],
+  "nimexe": ""
+}

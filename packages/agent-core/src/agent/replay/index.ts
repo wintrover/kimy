@@ -1,6 +1,7 @@
 import type { Agent } from '..';
 import type { AgentReplayRecord, AgentReplayRecordPayload } from '../../rpc/resumed';
 import type { ContextMessage } from '../context';
+import { getTimestamp } from '#/agent/records/timestamp';
 
 export interface ReplayRangeOptions {
   readonly start?: number;
@@ -30,7 +31,7 @@ export class ReplayBuilder {
       if (this.frozen) return;
       const stamped: AgentReplayRecord = {
         ...record,
-        time: this.agent.records.restoring?.time ?? Date.now(),
+        time: getTimestamp(this.agent.records.restoring),
       };
       this.records.push(stamped);
     }

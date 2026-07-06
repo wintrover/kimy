@@ -166,7 +166,8 @@ describe('FullCompaction', () => {
       maxRecentMessages: 3,
       maxRecentUserMessages: Infinity,
       maxRecentSizeRatio: 0.2,
-      minOverflowReductionRatio: 0.05,
+      minOverflowReductionNum: 1,
+      minOverflowReductionDenom: 20,
     });
 
     expect(strategy.shouldCompact(1)).toBe(false);
@@ -1869,10 +1870,10 @@ describe('FullCompaction', () => {
       [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 9, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
       [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 20, "maxContextTokens": 1000000, "contextUsage": 0.00002, "planMode": false, "swarmMode": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 491, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 491, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 9, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.step.interrupted       { "turnId": 0, "step": 2, "reason": "error", "message": "Compaction limit exceeded (1)" }
-      [emit] turn.ended                  { "turnId": 0, "reason": "failed", "error": { "code": "context.overflow", "message": "Compaction limit exceeded (1)", "name": "KimiError", "details": { "maxCompactions": 1, "turnId": 0 }, "retryable": true } }
+      [emit] turn.ended                  { "turnId": 0, "reason": "failed", "error": { "code": "context.overflow", "message": "Compaction limit exceeded (1)", "name": "KimiError", "details": { "maxCompactions": 1, "turnId": 0 }, "retryable": true, "_effect": "NONE" } }
     `);
     expect(ctx.newEvents()).toMatchInlineSnapshot(
-      `[emit] error   { "code": "context.overflow", "message": "Compaction limit exceeded (1)", "name": "KimiError", "details": { "maxCompactions": 1, "turnId": 0 }, "retryable": true }`,
+      `[emit] error   { "code": "context.overflow", "message": "Compaction limit exceeded (1)", "name": "KimiError", "details": { "maxCompactions": 1, "turnId": 0 }, "retryable": true, "_effect": "NONE" }`,
     );
     expect(ctx.llmInputs()).toMatchInlineSnapshot(`
       call 1:
@@ -2091,7 +2092,8 @@ function testCompactionStrategy(maxSize: number = 1_000): DefaultCompactionStrat
     maxRecentMessages: 10,
     maxRecentUserMessages: Infinity,
     maxRecentSizeRatio: 0.2,
-    minOverflowReductionRatio: 0.05,
+    minOverflowReductionNum: 1,
+    minOverflowReductionDenom: 20,
   });
 }
 
@@ -2104,7 +2106,8 @@ function overflowOnlyCompactionStrategy(maxSize: number = 14): DefaultCompaction
     maxRecentMessages: 3,
     maxRecentUserMessages: Infinity,
     maxRecentSizeRatio: 0.2,
-    minOverflowReductionRatio: 0.05,
+    minOverflowReductionNum: 1,
+    minOverflowReductionDenom: 20,
   });
 }
 

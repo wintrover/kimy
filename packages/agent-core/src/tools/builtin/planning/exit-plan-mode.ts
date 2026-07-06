@@ -129,22 +129,26 @@ export class ExitPlanModeTool implements BuiltinTool<ExitPlanModeInput> {
       };
     }
 
-    const resolvedPlan = await this.resolvePlan();
-    if (!resolvedPlan.ok) return resolvedPlan.error;
+    try {
+      const resolvedPlan = await this.resolvePlan();
+      if (!resolvedPlan.ok) return resolvedPlan.error;
 
-    this.agent.telemetry.track('plan_submitted', {
-      has_options: args.options !== undefined && args.options.length >= 2,
-    });
+      this.agent.telemetry.track('plan_submitted', {
+        has_options: args.options !== undefined && args.options.length >= 2,
+      });
 
-    const failed = this.exitPlanMode();
-    if (failed !== undefined) return failed;
+      const failed = this.exitPlanMode();
+      if (failed !== undefined) return failed;
 
-    this.agent.telemetry.track('plan_resolved', { outcome: 'auto_approved' });
+      this.agent.telemetry.track('plan_resolved', { outcome: 'auto_approved' });
 
-    return {
-      isError: false,
-      output: `Exited plan mode. ${formatPlanForOutput(resolvedPlan.plan, resolvedPlan.path)}`,
-    };
+      return {
+        isError: false,
+        output: `Exited plan mode. ${formatPlanForOutput(resolvedPlan.plan, resolvedPlan.path)}`,
+      };
+    } catch (error) {
+      throw error;
+    }
   }
 
   private exitPlanMode(): ExecutableToolResult | undefined {

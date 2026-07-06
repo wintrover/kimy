@@ -45,6 +45,7 @@ export class SavePlanTool implements BuiltinTool<SavePlanInput> {
         }
         try {
           await this.agent.kaos.writeText(planFilePath, args.content);
+          this.agent.planMode.markPlanSaved('save-plan.execute');
           return { output: `Plan saved to ${planFilePath}`, isError: false };
         } catch (error) {
           return { output: `Error saving plan: ${error}`, isError: true };

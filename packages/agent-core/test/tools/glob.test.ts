@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { expandBraces, type GlobInput, GlobInputSchema, GlobTool, MAX_MATCHES } from '../../src/tools/builtin/file/glob';
+import { compactPathsToTree, expandBraces, type GlobInput, GlobInputSchema, GlobTool, MAX_MATCHES } from '../../src/tools/builtin/file/glob';
+import { flags } from '../../src/flags';
 import type { WorkspaceConfig } from '../../src/tools/support/workspace';
 import { createFakeKaos } from './fixtures/fake-kaos';
 import { executeTool } from './fixtures/execute-tool';
@@ -698,5 +699,158 @@ describe('expandBraces', () => {
     // silently dropping alternatives.
     const pathological = '{a,b,c}{d,e,f}{g,h,i}{j,k,l}{m,n,o}{p,q,r}{s,t,u}';
     expect(expandBraces(pathological)).toEqual([pathological]);
+  });
+});
+
+describe('compactPathsToTree', () => {
+  it('returns empty string for an empty input', () => {
+    expect(compactPathsToTree([])).toBe('');
+  });
+
+  it('returns a single path unchanged', () => {
+    expect(compactPathsToTree(['src/main.ts'])).toBe('src/main.ts');
+  });
+
+  it('returns paths unchanged when result set is ≤ 10 items (adaptive bypass)', () => {
+    const paths = ['c.ts', 'a.ts', 'b.ts'];
+    expect(compactPathsToTree(paths)).toBe('c.ts\na.ts\nb.ts');
+  });
+
+  it('returns paths unchanged when average path length is < 30 chars', () => {
+    // 20 paths, all short (< 30 chars avg) → adaptive bypass
+    const paths = Array.from({ length: 20 }, (_, i) => `src/file_${String(i)}.ts`);
+    const result = compactPathsToTree(paths);
+    // No meta comment — just the paths joined
+    expect(result).not.toContain('[Note:');
+    expect(result).toContain('file_0.ts');
+  });
+
+  it('sorts alphabetically when compression is active', () => {
+    // 20 paths with long enough names (avg >= 30 chars) to trigger compression
+    const paths = Array.from({ length: 20 }, (_, i) =>
+      `packages/agent-core/src/tools/builtin/file/component_${String(i).padStart(2, '0')}.ts`,
+    );
+    const result = compactPathsToTree(paths);
+    expect(result).toContain('[Note:');
+    // Paths are 7 levels deep (packages/.../file/component_XX.ts),
+    // file/ is at depth 6 which exceeds MAX_DEPTH, so files are listed individually.
+    const lines = result.split('\n');
+    const fileLines = lines.filter((l) => l.includes('component_'));
+    expect(fileLines.length).toBe(20);
+    for (let i = 1; i < fileLines.length; i++) {
+      expect(fileLines[i - 1]!.localeCompare(fileLines[i]!)).toBeLessThanOrEqual(0);
+    }
+  });
+
+  it('produces the same output for the same file set in different input orders', () => {
+    const base = Array.from({ length: 20 }, (_, i) =>
+      `packages/agent-core/src/tools/builtin/file/component_${String(i).padStart(2, '0')}.ts`,
+    );
+    const shuffled = [...base].toReversed();
+    expect(compactPathsToTree(base)).toBe(compactPathsToTree(shuffled));
+  });
+
+  it('groups files in a directory with 3+ members using bracket notation', () => {
+    const paths = Array.from({ length: 20 }, (_, i) => {
+      // Both dirs same length so avg >= 30
+      const dir = i < 10 ? 'packages/agent/alpha' : 'packages/agent/beta';
+      return `${dir}/component_${String(i).padStart(2, '0')}.ts`;
+    });
+    const result = compactPathsToTree(paths);
+    expect(result).toContain('[Note:');
+    // Both alpha/ and beta/ have 10 direct files each → should be grouped
+    expect(result).toContain('alpha/ → [');
+    expect(result).toContain('beta/ → [');
+  });
+
+  it('lists individual files for directories with < 3 members', () => {
+    const paths: string[] = [];
+    // 15 long paths: 13 in alpha (grouped), 2 in beta (not grouped)
+    for (let i = 0; i < 13; i++) {
+      paths.push(`packages/agent/alpha/component_${String(i).padStart(2, '0')}.ts`);
+    }
+    paths.push('packages/agent/beta/first_component_file.ts');
+    paths.push('packages/agent/beta/second_component.ts');
+    const result = compactPathsToTree(paths);
+    expect(result).toContain('alpha/ → [');
+    // beta/ has only 2 files → individual lines, not bracket notation
+    expect(result).not.toContain('beta/ → [');
+  });
+
+  it('handles paths with no directory component (flat filenames)', () => {
+    const paths = Array.from({ length: 20 }, (_, i) =>
+      `very_long_filename_component_${String(i).padStart(2, '0')}.ts`,
+    );
+    const result = compactPathsToTree(paths);
+    expect(result).toContain('[Note:');
+    // All files are at root level, should appear individually
+    expect(result).toContain('very_long_filename_component_00.ts');
+    expect(result).toContain('very_long_filename_component_19.ts');
+  });
+
+  it('handles absolute paths and groups at the leaf directory level', () => {
+    const paths = Array.from({ length: 20 }, (_, i) =>
+      `/project/packages/module/component_${String(i).padStart(2, '0')}.ts`,
+    );
+    const result = compactPathsToTree(paths);
+    expect(result).toContain('[Note:');
+    // module/ has 10 direct files → grouped
+    expect(result).toContain('module/ → [');
+  });
+});
+
+describe('semantic_compaction flag gating', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('produces raw newline-delimited output when the flag is disabled', async () => {
+    vi.spyOn(flags, 'enabled').mockReturnValue(false);
+
+    const paths = Array.from({ length: 15 }, (_, i) =>
+      `/workspace/packages/module/component_${String(i).padStart(2, '0')}.ts`,
+    );
+    const glob = vi.fn().mockReturnValue(asyncPaths(paths));
+    const tool = new GlobTool(
+      createFakeKaos({
+        glob,
+        iterdir: vi.fn().mockReturnValue(asyncPaths(['/workspace/packages'])),
+        stat: vi.fn().mockResolvedValue(stat(1)),
+      }),
+      { workspaceDir: '/workspace', additionalDirs: [] },
+    );
+
+    const result = await executeTool(tool, context({ pattern: '**/*.ts' }));
+
+    expect(result.isError).toBeFalsy();
+    // When flag is disabled: each path appears on its own line, no tree notation
+    expect(result.output).not.toContain('[Note:');
+    expect(result.output).not.toContain('→');
+    expect(result.output).toContain('component_00.ts');
+    expect(result.output).toContain('component_14.ts');
+  });
+
+  it('produces tree-compressed output when the flag is enabled', async () => {
+    vi.spyOn(flags, 'enabled').mockReturnValue(true);
+
+    const paths = Array.from({ length: 20 }, (_, i) =>
+      `/workspace/packages/agent/core/src/component_${String(i).padStart(2, '0')}.ts`,
+    );
+    const glob = vi.fn().mockReturnValue(asyncPaths(paths));
+    const tool = new GlobTool(
+      createFakeKaos({
+        glob,
+        iterdir: vi.fn().mockReturnValue(asyncPaths(['/workspace/packages'])),
+        stat: vi.fn().mockResolvedValue(stat(1)),
+      }),
+      { workspaceDir: '/workspace', additionalDirs: [] },
+    );
+
+    const result = await executeTool(tool, context({ pattern: '**/*.ts' }));
+
+    expect(result.isError).toBeFalsy();
+    // When flag is enabled: tree compression is applied (meta comment + bracket notation)
+    expect(result.output).toContain('[Note:');
+    expect(result.output).toContain('component_00.ts');
   });
 });

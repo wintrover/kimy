@@ -23,6 +23,7 @@ import {
   makeErrorPayload,
   toKimiErrorPayload,
 } from '#/errors';
+import { PlanMode, PlanTransition, PlanTransitionState } from '../plan';
 import { isAbortError, isMaxStepsExceededError } from '../../loop/errors';
 import {
   createLoopEventDispatcher,
@@ -42,6 +43,51 @@ import { renderUserPromptHookBlockResult, renderUserPromptHookResult } from '../
 import { canonicalTelemetryArgs, isPlainRecord } from './canonical-args';
 import { ToolCallDeduplicator } from './tool-dedup';
 import { budgetToolResultForModel } from './tool-result-budget';
+
+// Re-export pure functions for backward compatibility
+import {
+  isGoalOutcomeReminderOrigin,
+  hasStepBudgetRemaining,
+  mapLoopEvent,
+  summarizeTurnError,
+  goalFailurePauseReason,
+  pauseReasonWithMessage,
+  toolInputRecord,
+  toolOutputText,
+  interruptedStep,
+  classifyApiError,
+  apiStatusCode,
+  summaryStatusCode,
+  isApiConnectionError,
+  isApiTimeoutError,
+  isApiEmptyResponseError,
+  currentTurnInputTokens,
+  telemetryToolOutcome,
+  telemetryToolErrorType,
+  toolResultText,
+} from './turn-pure';
+export {
+  isGoalOutcomeReminderOrigin,
+  hasStepBudgetRemaining,
+  mapLoopEvent,
+  summarizeTurnError,
+  goalFailurePauseReason,
+  pauseReasonWithMessage,
+  toolInputRecord,
+  toolOutputText,
+  interruptedStep,
+  classifyApiError,
+  apiStatusCode,
+  summaryStatusCode,
+  isApiConnectionError,
+  isApiTimeoutError,
+  isApiEmptyResponseError,
+  currentTurnInputTokens,
+  telemetryToolOutcome,
+  telemetryToolErrorType,
+  toolResultText,
+};
+export type { ApiErrorClassification, EffectMarker } from './turn-pure';
 
 interface ActiveTurn {
   readonly turnId: number;
@@ -565,6 +611,13 @@ export class TurnFlow {
     if (this.agent.swarmMode.shouldAutoExit) {
       this.agent.swarmMode.exit();
     }
+    // ── AgentPhase safety guard: unconditional reset on turn end ──
+    // This is the top-level safety net. Regardless of what happened during the turn
+    // (panic, unhandled rejection, abort, LLM escape, etc.),
+    // if the agent is still in execution phase when the turn ends, force reset to planning.
+    if (this.agent.agentPhase?.isExecution) {
+      this.agent.agentPhase.resetToPlanning();
+    }
     if (errorEvent !== undefined) {
       this.agent.emitEvent(errorEvent);
     }
@@ -663,7 +716,7 @@ export class TurnFlow {
               const snapshot = await this.agent.goal.recordTokenUsage(grandTotal(usage));
               stopForGoalBudget = snapshot?.budget.overBudget === true;
             } catch (error) {
-              this.agent.log.warn('goal token accounting failed', { error });
+              this.agent.log?.warn('goal token accounting failed', { error });
             }
           },
           hooks: {
@@ -673,6 +726,9 @@ export class TurnFlow {
               await this.agent.fullCompaction.beforeStep(stepSignal);
               await this.agent.injection.inject();
               deduper.beginStep();
+              if (this.agent.planMode.transitionState === PlanTransitionState.PLAN_SAVED) {
+                return { forceToolChoice: { type: 'tool', name: 'ExitPlanMode' } };
+              }
               return;
             },
             afterStep: async ({ usage }) => {
@@ -684,6 +740,73 @@ export class TurnFlow {
             // oxlint-disable-next-line no-loop-func -- stop hook continuation state is scoped to this turn.
             shouldContinueAfterStop: async (ctx) => {
               const { signal, virtualTurn } = ctx;
+
+              // -1. Plan mode invariant — SavePlan 후 ExitPlanMode 없이 종료됨
+              if (
+                this.agent.planMode.transitionState === PlanTransitionState.PLAN_SAVED
+                && ctx.stopReason === 'end_turn'
+              ) {
+                const attempts = this.agent.planMode.incrementResumeAttempts();
+
+                if (attempts > PlanMode.MAX_PLAN_RESUME_ATTEMPTS) {
+                  // 한도 초과: 강제 리셋
+                  this.agent.planMode.clearTransitionState(
+                    PlanTransition.PLAN_SAVED_TO_RESUME_EXHAUSTED, 'shouldContinueAfterStop',
+                  );
+                  this.agent.log?.warn?.('plan_resume_exhausted', {
+                    attempts,
+                    maxAttempts: PlanMode.MAX_PLAN_RESUME_ATTEMPTS,
+                    action: 'force_reset_to_idle',
+                  });
+                  return { continue: false };
+                }
+
+                // 마이크로 재개: 시스템 프롬프트 주입
+                this.agent.context.appendUserMessage(
+                  [
+                    {
+                      type: 'text',
+                      text:
+                        '이전 턴이 비정상적으로 단절되었습니다. SavePlan이 완료되었으나 ExitPlanMode가 호출되지 않았습니다. 즉시 ExitPlanMode를 호출하여 계획을 사용자에게 제시하십시오. 인자는 필요 없습니다.',
+                    },
+                  ],
+                  {
+                    kind: 'system_trigger',
+                    name: 'plan_micro_resume',
+                  },
+                );
+
+                this.agent.log?.info('plan_transition', {
+                  transition: PlanTransition.PLAN_SAVED_TO_MICRO_RESUME,
+                  source: 'shouldContinueAfterStop',
+                  timestamp: Date.now(),
+                  metadata: { attempt: attempts, maxAttempts: PlanMode.MAX_PLAN_RESUME_ATTEMPTS },
+                });
+
+                return { continue: true };
+              }
+
+              // ── Execution Phase LLM Escape Guard ──
+              // When in execution phase, the LLM MUST call AgentSwarm. If it
+              // responded with end_turn without calling AgentSwarm, inject a
+              // 1-time correction message and re-invoke. Infinite-loop
+              // prevention: markEscapeAttempted returns false on the second attempt.
+              if (this.agent.agentPhase?.isExecution) {
+                const lastMsg = this.agent.context.history.at(-1);
+                const swarmCalled = lastMsg?.role === 'assistant'
+                  && lastMsg.toolCalls?.some(tc => tc.name === 'AgentSwarm') === true;
+
+                if (!swarmCalled && this.agent.agentPhase.markEscapeAttempted()) {
+                  this.agent.context.appendUserMessage(
+                    [{ type: 'text', text: 'You are in the Execution Phase. You MUST call AgentSwarm now. The swarm parameters have been prepared. Do not respond with text — call the AgentSwarm tool to execute the swarm.' }],
+                    { kind: 'agent_phase_escape_guard' },
+                  );
+                  return { continue: true };
+                }
+
+                // Either AgentSwarm was called, or escape guard already fired — reset phase
+                this.agent.agentPhase.resetToPlanning();
+              }
 
               // 0. Virtual-turn interceptor: when the tool batch was
               //    intercepted (mixed AgentSwarm + leaf-tool batch), inject a
@@ -825,13 +948,13 @@ export class TurnFlow {
           continue; // Retry with new output cap applied
         }
         if (isMaxStepsExceededError(error)) {
-          this.agent.log.warn('turn hit max steps', {
+          this.agent.log?.warn('turn hit max steps', {
             turnId,
             steps: this.currentStepByTurn.get(turnId) ?? this.currentStep,
             limit: isKimiError(error) ? error.details?.['maxSteps'] : undefined,
           });
         } else {
-          this.agent.log.error('turn failed', { turnId, error });
+          this.agent.log?.error('turn failed', { turnId, error });
         }
         throw error;
       }
@@ -1003,258 +1126,4 @@ export class TurnFlow {
     } catch {}
     this.manifestSyncTurnId = turnIndex;
   }
-}
-
-function isGoalOutcomeReminderOrigin(origin: PromptOrigin | undefined): boolean {
-  return (
-    origin?.kind === 'system_trigger' &&
-    (origin.name === GOAL_COMPLETION_REMINDER_NAME ||
-      origin.name === GOAL_BLOCKED_REMINDER_NAME)
-  );
-}
-
-function hasStepBudgetRemaining(maxSteps: number | undefined, currentStep: number): boolean {
-  return maxSteps === undefined || maxSteps <= 0 || currentStep < maxSteps;
-}
-
-function mapLoopEvent(event: LoopEvent, turnId: number): AgentEvent | undefined {
-  switch (event.type) {
-    case 'step.begin':
-      return {
-        type: 'turn.step.started',
-        turnId,
-        step: event.step,
-        stepId: event.uuid,
-      };
-    case 'step.end':
-      return {
-        type: 'turn.step.completed',
-        turnId,
-        step: event.step,
-        stepId: event.uuid,
-        usage: event.usage,
-        finishReason: event.finishReason,
-        llmFirstTokenLatencyMs: event.llmFirstTokenLatencyMs,
-        llmStreamDurationMs: event.llmStreamDurationMs,
-        providerFinishReason: event.providerFinishReason,
-        rawFinishReason: event.rawFinishReason,
-      };
-    case 'step.retrying':
-      return {
-        type: 'turn.step.retrying',
-        turnId,
-        step: event.step,
-        stepId: event.stepUuid,
-        failedAttempt: event.failedAttempt,
-        nextAttempt: event.nextAttempt,
-        maxAttempts: event.maxAttempts,
-        delayMs: event.delayMs,
-        errorName: event.errorName,
-        errorMessage: event.errorMessage,
-        statusCode: event.statusCode,
-      };
-    case 'content.part':
-      return undefined;
-    case 'tool.call':
-      return {
-        type: 'tool.call.started',
-        turnId,
-        toolCallId: event.toolCallId,
-        name: event.name,
-        args: event.args,
-        description: event.description,
-        display: event.display,
-      };
-    case 'tool.result':
-      return {
-        type: 'tool.result',
-        turnId,
-        toolCallId: event.toolCallId,
-        output: event.result.output,
-        isError: event.result.isError,
-      };
-    case 'turn.interrupted':
-      if (event.activeStep === undefined) return undefined;
-      return {
-        type: 'turn.step.interrupted',
-        turnId,
-        step: event.activeStep,
-        reason: event.reason,
-        message: event.message,
-      };
-    case 'text.delta':
-      return {
-        type: 'assistant.delta',
-        turnId,
-        delta: event.delta,
-      };
-    case 'thinking.delta':
-      return {
-        type: 'thinking.delta',
-        turnId,
-        delta: event.delta,
-      };
-    case 'tool.call.delta':
-      return {
-        type: 'tool.call.delta',
-        turnId,
-        toolCallId: event.toolCallId,
-        name: event.name,
-        argumentsPart: event.argumentsPart,
-      };
-    case 'tool.progress':
-      return {
-        type: 'tool.progress',
-        turnId,
-        toolCallId: event.toolCallId,
-        update: event.update,
-      };
-  }
-}
-
-function summarizeTurnError(error: unknown, turnId: number): KimiErrorPayload {
-  const payload = toKimiErrorPayload(error);
-  const details = { ...payload.details, turnId };
-
-  // Substitute a friendlier TUI-aware message for model-not-configured.
-  // The raw "Model not set" / "Provider not set" text is not actionable;
-  // this string points the user at the login flow.
-  if (payload.code === 'model.not_configured') {
-    return { ...payload, message: LLM_NOT_SET_MESSAGE, details };
-  }
-
-  return { ...payload, details };
-}
-
-function goalFailurePauseReason(error: KimiErrorPayload | undefined): string {
-  if (error?.code === ErrorCodes.PROVIDER_RATE_LIMIT) return GOAL_RATE_LIMIT_PAUSE_REASON;
-  if (error?.code === ErrorCodes.PROVIDER_CONNECTION_ERROR) {
-    return pauseReasonWithMessage(GOAL_PROVIDER_CONNECTION_PAUSE_PREFIX, error.message);
-  }
-  if (error?.code === ErrorCodes.PROVIDER_AUTH_ERROR) {
-    return pauseReasonWithMessage(GOAL_PROVIDER_AUTH_PAUSE_PREFIX, error.message);
-  }
-  if (error?.code === ErrorCodes.PROVIDER_API_ERROR) {
-    return pauseReasonWithMessage(GOAL_PROVIDER_API_PAUSE_PREFIX, error.message);
-  }
-  if (
-    error?.code === ErrorCodes.MODEL_NOT_CONFIGURED ||
-    error?.code === ErrorCodes.MODEL_CONFIG_INVALID
-  ) {
-    return pauseReasonWithMessage(GOAL_MODEL_CONFIG_PAUSE_PREFIX, error.message);
-  }
-  return pauseReasonWithMessage(GOAL_RUNTIME_PAUSE_PREFIX, error?.message);
-}
-
-function pauseReasonWithMessage(prefix: string, message: string | undefined): string {
-  return message === undefined || message.length === 0 ? prefix : `${prefix}: ${message}`;
-}
-
-function toolInputRecord(args: unknown): Record<string, unknown> {
-  return isPlainRecord(args) ? args : {};
-}
-
-function toolOutputText(output: ExecutableToolResult['output']): string {
-  if (typeof output === 'string') return output;
-  return output
-    .filter((part): part is Extract<(typeof output)[number], { type: 'text' }> => {
-      return typeof part === 'object' && part !== null && part.type === 'text';
-    })
-    .map((part) => part.text)
-    .join('');
-}
-
-function interruptedStep(event: LoopTurnInterruptedEvent): number {
-  return event.activeStep ?? event.attemptedSteps;
-}
-
-interface ApiErrorClassification {
-  readonly errorType: string;
-  readonly statusCode?: number;
-}
-
-function classifyApiError(error: unknown, summary: KimiErrorPayload): ApiErrorClassification {
-  const statusCode = apiStatusCode(error) ?? summaryStatusCode(summary);
-  if (statusCode !== undefined) {
-    if (statusCode === 429) return { errorType: 'rate_limit', statusCode };
-    if (statusCode === 401 || statusCode === 403) return { errorType: 'auth', statusCode };
-    if (statusCode >= 500) return { errorType: '5xx_server', statusCode };
-    if (isContextOverflowStatusError(statusCode, summary.message)) {
-      return { errorType: 'context_overflow', statusCode };
-    }
-    if (statusCode >= 400) return { errorType: '4xx_client', statusCode };
-    return { errorType: 'api', statusCode };
-  }
-
-  if (summary.code === ErrorCodes.PROVIDER_RATE_LIMIT) return { errorType: 'rate_limit' };
-  if (summary.code === ErrorCodes.PROVIDER_AUTH_ERROR) return { errorType: 'auth' };
-  if (summary.code === ErrorCodes.CONTEXT_OVERFLOW) return { errorType: 'context_overflow' };
-  if (isApiConnectionError(error, summary)) return { errorType: 'network' };
-  if (isApiTimeoutError(error, summary)) return { errorType: 'timeout' };
-  if (isApiEmptyResponseError(error, summary)) return { errorType: 'empty_response' };
-  return { errorType: 'other' };
-}
-
-function apiStatusCode(error: unknown): number | undefined {
-  if (error instanceof APIStatusError) {
-    const statusCode = (error as { readonly statusCode?: unknown }).statusCode;
-    return typeof statusCode === 'number' ? statusCode : undefined;
-  }
-  if (typeof error !== 'object' || error === null) return undefined;
-  const statusCode = (error as { readonly statusCode?: unknown }).statusCode;
-  if (typeof statusCode === 'number') return statusCode;
-  const status = (error as { readonly status?: unknown }).status;
-  return typeof status === 'number' ? status : undefined;
-}
-
-function summaryStatusCode(summary: KimiErrorPayload): number | undefined {
-  const statusCode = summary.details?.['statusCode'];
-  return typeof statusCode === 'number' ? statusCode : undefined;
-}
-
-function isApiConnectionError(error: unknown, summary: KimiErrorPayload): boolean {
-  return error instanceof APIConnectionError || summary.name === 'APIConnectionError';
-}
-
-function isApiTimeoutError(error: unknown, summary: KimiErrorPayload): boolean {
-  return (
-    error instanceof APITimeoutError ||
-    summary.name === 'APITimeoutError' ||
-    summary.name === 'TimeoutError'
-  );
-}
-
-function isApiEmptyResponseError(error: unknown, summary: KimiErrorPayload): boolean {
-  return error instanceof APIEmptyResponseError || summary.name === 'APIEmptyResponseError';
-}
-
-function currentTurnInputTokens(usage: TokenUsage | undefined): number | undefined {
-  if (usage === undefined) return undefined;
-  return inputTotal(usage);
-}
-
-type ToolTelemetryResult = Extract<LoopEvent, { type: 'tool.result' }>['result'];
-
-function telemetryToolOutcome(result: ToolTelemetryResult): 'success' | 'error' | 'cancelled' {
-  if (result.isError !== true) return 'success';
-  const text = toolResultText(result).toLowerCase();
-  return text.includes('aborted') ||
-    text.includes('cancelled') ||
-    text.includes('manually interrupted')
-    ? 'cancelled'
-    : 'error';
-}
-
-function telemetryToolErrorType(result: ToolTelemetryResult): string {
-  const text = toolResultText(result);
-  if (text.startsWith('Tool "') && text.includes('" not found')) return 'ToolNotFound';
-  if (text.startsWith('Invalid args for tool "')) return 'ToolInputError';
-  if (text.includes('prepareToolExecution hook failed')) return 'HookError';
-  if (text.includes('finalizeToolResult hook failed')) return 'HookError';
-  if (text.includes('blocked')) return 'ToolBlocked';
-  return 'ToolError';
-}
-
-function toolResultText(result: ToolTelemetryResult): string {
-  return toolOutputText(result.output);
 }

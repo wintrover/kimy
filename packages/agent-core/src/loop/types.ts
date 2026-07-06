@@ -231,6 +231,7 @@ export interface LoopStoppedStepContext extends LoopStepHookContext {
 export interface BeforeStepResult {
   readonly block?: boolean | undefined;
   readonly reason?: string | undefined;
+  readonly forceToolChoice?: { type: 'tool'; name: string } | undefined;
 }
 
 export interface AfterStepResult {

@@ -85,6 +85,7 @@
     "ulid": "^3.0.1",
     "undici": "^7.27.1",
     "yauzl": "^3.3.0",
+    "z3-solver": "^4.16.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -98,6 +99,7 @@
     "@types/tar": "^7.0.87",
     "@types/yauzl": "^2.10.3",
     "@types/yazl": "^2.4.6",
+    "fast-check": "^4.8.0",
     "sinon": "^22.0.0",
     "yazl": "^3.3.1"
   }

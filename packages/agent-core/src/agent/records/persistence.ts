@@ -1,6 +1,6 @@
 import { createReadStream } from 'node:fs';
 import { mkdir, open } from 'node:fs/promises';
-import { dirname } from 'pathe';
+import { dirname, join } from 'pathe';
 
 import { syncDir } from '../../utils/fs';
 import type { BlobStore } from './blobref';
@@ -56,6 +56,10 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
     private readonly filePath: string,
     private readonly options: FileSystemAgentRecordPersistenceOptions = {},
   ) {}
+
+  getSnapshotDir(): string {
+    return join(dirname(this.filePath), 'snapshots');
+  }
 
   async *read(): AsyncIterable<AgentRecord> {
     await this.flush();

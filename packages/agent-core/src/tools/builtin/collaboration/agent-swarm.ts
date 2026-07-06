@@ -3,6 +3,11 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
 import type { SwarmMode } from '../../../agent/swarm';
+import {
+  CONTRACT_PLACEHOLDER,
+  resolveContractTemplate,
+  type AgentContract,
+} from '../../../agent/swarm/contract-injector';
 import type { BuiltinTool } from '../../../agent/tool';
 import { log } from '../../../logging/logger';
 import {
@@ -19,6 +24,27 @@ import AGENT_SWARM_DESCRIPTION from './agent-swarm.md?raw';
 const DEFAULT_SUBAGENT_TYPE = 'coder';
 const PROMPT_TEMPLATE_PLACEHOLDER = '{{item}}';
 const MAX_AGENT_SWARM_SUBAGENTS = 128;
+
+/**
+ * Optional contract content injected into every subagent prompt when
+ * the prompt_template contains `{{contract}}`.
+ */
+let _swarmContract: AgentContract | undefined;
+
+/**
+ * Set the active contract for the next AgentSwarm execution.
+ * Pass `undefined` to clear.
+ */
+export function setSwarmContract(contract: AgentContract | undefined): void {
+  _swarmContract = contract;
+}
+
+/**
+ * Get the currently active swarm contract.
+ */
+export function getSwarmContract(): AgentContract | undefined {
+  return _swarmContract;
+}
 
 export const AgentSwarmToolInputSchema = z
   .object({
@@ -41,7 +67,7 @@ export const AgentSwarmToolInputSchema = z
       .min(1)
       .optional()
       .describe(
-        `Prompt template for each subagent. The ${PROMPT_TEMPLATE_PLACEHOLDER} placeholder is replaced with each item value.`,
+        `Prompt template for each subagent. The ${PROMPT_TEMPLATE_PLACEHOLDER} placeholder is replaced with each item value. The ${CONTRACT_PLACEHOLDER} placeholder, if present, is replaced with the active contract content.`,
       ),
     items: z
       .array(z.string().trim().min(1))
@@ -231,9 +257,11 @@ function createAgentSwarmSpecs(
     });
   }
   if (items.length > 0) {
+    const contract = getSwarmContract();
     const itemPromptTemplate = promptTemplate!;
     items.forEach((item, index) => {
-      const prompt = itemPromptTemplate.split(PROMPT_TEMPLATE_PLACEHOLDER).join(item);
+      const itemResolved = itemPromptTemplate.split(PROMPT_TEMPLATE_PLACEHOLDER).join(item);
+      const prompt = resolveContractTemplate(itemResolved, contract);
       const previousIndex = seenPrompts.get(prompt);
       if (previousIndex !== undefined) {
         throw new Error(

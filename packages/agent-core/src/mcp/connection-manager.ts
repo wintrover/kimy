@@ -13,6 +13,13 @@ import { StdioMcpClient } from './client-stdio';
 import type { McpOAuthService } from './oauth';
 import { assertMcpInputSchema, type MCPClient } from './types';
 
+/**
+ * Well-known MCP server name for the symbol dependency graph.  Callers use
+ * {@link McpConnectionManager.getSymbolGraphClient} to obtain the client for
+ * cross-process symbol graph queries (contract-validator, dependency analysis).
+ */
+export const SYMBOL_GRAPH_SERVER_NAME = 'symbol-graph-mcp';
+
 export type McpServerStatus = 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth';
 
 export interface McpServerEntry {
@@ -151,6 +158,51 @@ export class McpConnectionManager {
       tools: entry.tools,
       enabledNames: entry.enabledNames ?? new Set(entry.tools.map((t) => t.name)),
     };
+  }
+
+  /**
+   * Returns the MCP client for the symbol-graph server, triggering a lazy
+   * connection if the server is configured but not yet started.  Returns
+   * `undefined` when the server is not configured, is disabled, or could not
+   * be connected.
+   *
+   * This is the primary entry-point for cross-process symbol graph queries
+   * used by the contract-validator and dependency analysis tools.
+   */
+  async getSymbolGraphClient(): Promise<MCPClient | undefined> {
+    const resolved = await this.ensureConnected(SYMBOL_GRAPH_SERVER_NAME);
+    return resolved?.client;
+  }
+
+  /**
+   * Ensures the given MCP server is connected, starting it lazily if it was
+   * registered but not yet started.  Returns the resolved client, tools, and
+   * enabled names — or `undefined` if the server is unknown, disabled, or
+   * could not be connected.
+   *
+   * Callers such as the contract-validator use this to obtain a live client
+   * for on-demand tool invocation without requiring the server to have been
+   * started during the initial `connectAll` phase.
+   */
+  async ensureConnected(
+    name: string,
+  ): Promise<
+    { client: MCPClient; tools: readonly Tool[]; enabledNames: ReadonlySet<string> } | undefined
+  > {
+    // Already connected — return synchronously.
+    const existing = this.resolved(name);
+    if (existing !== undefined) return existing;
+
+    const entry = this.entries.get(name);
+    if (entry === undefined) return undefined;
+    if (entry.config.enabled === false) return undefined;
+
+    // Entry exists but was never started — connect it now.
+    if (entry.status === 'pending' && entry.client === undefined) {
+      await this.connectOne(entry, this.beginConnectAttempt(entry));
+    }
+
+    return this.resolved(name);
   }
 
   connectAll(configs: Record<string, McpServerConfig>): Promise<void> {

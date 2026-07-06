@@ -1,0 +1,60 @@
+name: Lean 4 Verification
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  lean4-verify:
+    name: Lean 4 proof verification
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install elan (Lean 4 version manager)
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain leanprover/lean4:stable
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Verify Lean version
+        run: |
+          lean --version
+          lake --version
+
+      - name: Cache lake build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            tools/lean4-verification/.lake
+            ~/.elan
+          key: lean4-${{ runner.os }}-${{ hashFiles('tools/lean4-verification/lakefile.lean', 'tools/lean4-verification/lake-manifest.json') }}
+          restore-keys: |
+            lean4-${{ runner.os }}-
+
+      - name: Run lake build
+        working-directory: tools/lean4-verification
+        run: |
+          set -euo pipefail
+          lake build
+
+      - name: Verify all Lean proof files
+        working-directory: tools/lean4-verification
+        run: |
+          set -euo pipefail
+          # Collect all .lean files (excluding Lake build outputs)
+          LEAN_FILES=$(find . -name '*.lean' -not -path './.lake/*' -not -path './build/*')
+          if [ -z "$LEAN_FILES" ]; then
+            echo "::warning::No .lean files found in tools/lean4-verification/"
+            exit 0
+          fi
+          echo "Verifying Lean files:"
+          echo "$LEAN_FILES"
+          # --verify checks all declarations type-check and proofs are valid
+          echo "$LEAN_FILES" | xargs lean --verify

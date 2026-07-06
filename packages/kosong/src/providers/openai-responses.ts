@@ -1079,6 +1079,10 @@ export class OpenAIResponsesChatProvider implements ChatProvider {
         createParams['instructions'] = systemPrompt;
       }
 
+      if (options?.prompt_cache_key) {
+        createParams['prompt_cache_key'] = options.prompt_cache_key;
+      }
+
       if (
         !('responses' in client) ||
         typeof (client as { responses?: { create?: unknown } }).responses?.create !== 'function'

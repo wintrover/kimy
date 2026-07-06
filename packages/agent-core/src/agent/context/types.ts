@@ -69,6 +69,10 @@ export interface RetryOrigin {
   readonly trigger?: string;
 }
 
+export interface AgentPhaseEscapeGuardOrigin {
+  readonly kind: 'agent_phase_escape_guard';
+}
+
 export type PromptOrigin =
   | UserPromptOrigin
   | SkillActivationOrigin
@@ -79,7 +83,8 @@ export type PromptOrigin =
   | CronJobOrigin
   | CronMissedOrigin
   | HookResultOrigin
-  | RetryOrigin;
+  | RetryOrigin
+  | AgentPhaseEscapeGuardOrigin;
 
 export type ContextMessage = Message & {
   readonly origin?: PromptOrigin | undefined;

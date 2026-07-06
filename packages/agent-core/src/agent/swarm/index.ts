@@ -3,6 +3,12 @@ import type { Agent } from '..';
 import SWARM_MODE_ENTER_REMINDER from './enter-reminder.md?raw';
 import SWARM_MODE_EXIT_REMINDER from './exit-reminder.md?raw';
 
+export {
+  CONTRACT_PLACEHOLDER,
+  resolveContractTemplate,
+  type AgentContract,
+} from './contract-injector';
+
 /**
  * manual = persistent toggle (/swarm on);
  * task = one-shot /swarm prompt;

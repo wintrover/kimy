@@ -11,6 +11,33 @@ export type PlanData = null | {
 };
 export type PlanFilePath = string | null;
 
+// ── Plan transition state machine ────────────────────────────────────
+
+export const PlanTransitionState = {
+  IDLE: 'idle',
+  PLAN_SAVED: 'plan_saved',
+} as const;
+
+export type PlanTransitionState = typeof PlanTransitionState[keyof typeof PlanTransitionState];
+
+export const PlanTransition = {
+  IDLE_TO_PLAN_SAVED: 'IDLE_TO_PLAN_SAVED',
+  PLAN_SAVED_TO_IDLE: 'PLAN_SAVED_TO_IDLE',
+  PLAN_SAVED_TO_RESUME_EXHAUSTED: 'PLAN_SAVED_TO_RESUME_EXHAUSTED',
+  PLAN_SAVED_TO_MICRO_RESUME: 'PLAN_SAVED_TO_MICRO_RESUME',
+  PLAN_SAVED_TO_IDLE_FORCED: 'PLAN_SAVED_TO_IDLE_FORCED',
+  PLAN_SAVED_TO_SAFETY_RESET: 'PLAN_SAVED_TO_SAFETY_RESET',
+} as const;
+
+export type PlanTransition = typeof PlanTransition[keyof typeof PlanTransition];
+
+export interface PlanTransitionEvent {
+  transition: PlanTransition;
+  source: string;
+  timestamp: number;
+  metadata?: Record<string, unknown>;
+}
+
 export class PlanMode {
   protected _isActive = false;
   protected _planId: null | string = null;
@@ -21,6 +48,10 @@ export class PlanMode {
   private static readonly GC_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
   private static readonly PLAN_STALE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
   private static readonly MAX_WRITE_RETRIES = 3;
+
+  private _transitionState: PlanTransitionState = PlanTransitionState.IDLE;
+  private _planResumeAttempts = 0;
+  static readonly MAX_PLAN_RESUME_ATTEMPTS = 2;
 
   private getPlansDir(): string {
     return join(
@@ -33,6 +64,18 @@ export class PlanMode {
     protected readonly agent: Agent,
     private readonly planDir?: string,
   ) {}
+
+  /**
+   * Post-await guard: check that PlanMode is still active after an async operation.
+   * Returns false if exit() or cancel() deactivated the mode during the await.
+   */
+  private assertActive(operation: string): boolean {
+    if (!this._isActive) {
+      this.agent.log?.info('plan_operation_interrupted', { operation });
+      return false;
+    }
+    return true;
+  }
 
   async createPlanId(): Promise<string> {
     const existing = await this.collectExistingSlugs(this.getPlansDir());
@@ -69,8 +112,7 @@ export class PlanMode {
 
     try {
       const stat = await this.agent.kaos.stat(gcFile);
-      const elapsed = Date.now() / 1000 - stat.stMtime;
-      if (elapsed * 1000 < PlanMode.GC_THRESHOLD_MS) return;
+      if (Date.now() - stat.stMtime * 1000 < PlanMode.GC_THRESHOLD_MS) return;
     } catch (error) {
       if (isMissingFileError(error)) {
         // File doesn't exist — first run, proceed with GC
@@ -96,7 +138,7 @@ export class PlanMode {
           const stat = await this.agent.kaos.stat(filePath);
           const age = now - stat.stMtime * 1000;
           if (age > staleThreshold) {
-            this.agent.log?.info('PlanMode: stale plan file detected', { file: entry, ageDays: Math.floor(age / 86400000) });
+            this.agent.log?.info('PlanMode: stale plan file detected', { file: entry, ageDays: age / 86400000 | 0 });
           }
         } catch {
           // file may have been deleted between iterdir and stat — safe to skip
@@ -129,10 +171,12 @@ export class PlanMode {
       const planFilePath = this.planFilePathFor(id);
       this._planFilePath = planFilePath;
       await this.ensurePlanDirectory(planFilePath);
+      if (!this.assertActive('ensurePlanDirectory')) return;
       this.agent.records.logRecord({ type: 'plan_mode.enter', id });
       enterRecorded = true;
       if (createFile) {
         await this.writeEmptyPlanFile(planFilePath);
+        if (!this.assertActive('writeEmptyPlanFile')) return;
       }
     } catch (error) {
       if (enterRecorded) {
@@ -160,15 +204,28 @@ export class PlanMode {
   }
 
   cancel(id?: string): void {
-    this.agent.records.logRecord({ type: 'plan_mode.cancel', id });
-    this.agent.replayBuilder.push({
-      type: 'plan_updated',
-      enabled: false,
-    });
-    this._isActive = false;
-    this._planId = null;
-    this._planFilePath = null;
-    this.agent.emitStatusUpdated();
+    try {
+      this.agent.records.logRecord({ type: 'plan_mode.cancel', id });
+      this.agent.replayBuilder.push({
+        type: 'plan_updated',
+        enabled: false,
+      });
+      this._isActive = false;
+      this._planId = null;
+      this._planFilePath = null;
+      this.agent.emitStatusUpdated();
+    } finally {
+      try {
+        if (this._transitionState !== PlanTransitionState.IDLE) {
+          this.clearTransitionState(PlanTransition.PLAN_SAVED_TO_IDLE, 'plan_mode.cancel.forced_cleanup');
+        }
+      } catch (cleanupError) {
+        this._transitionState = PlanTransitionState.IDLE;
+        this._planResumeAttempts = 0;
+        this.agent.log?.error?.('plan_cancel_cleanup_failed', { error: cleanupError });
+      }
+      this._planResumeAttempts = 0;
+    }
   }
 
   async clear(): Promise<void> {
@@ -177,15 +234,28 @@ export class PlanMode {
   }
 
   exit(id?: string): void {
-    this.agent.records.logRecord({ type: 'plan_mode.exit', id });
-    this.agent.replayBuilder.push({
-      type: 'plan_updated',
-      enabled: false,
-    });
-    this._isActive = false;
-    this._planId = null;
-    this._planFilePath = null;
-    this.agent.emitStatusUpdated();
+    try {
+      this.agent.records.logRecord({ type: 'plan_mode.exit', id });
+      this.agent.replayBuilder.push({
+        type: 'plan_updated',
+        enabled: false,
+      });
+      this._isActive = false;
+      this._planId = null;
+      this._planFilePath = null;
+      this.agent.emitStatusUpdated();
+    } finally {
+      try {
+        if (this._transitionState !== PlanTransitionState.IDLE) {
+          this.clearTransitionState(PlanTransition.PLAN_SAVED_TO_IDLE, 'plan_mode.exit.forced_cleanup');
+        }
+      } catch (cleanupError) {
+        this._transitionState = PlanTransitionState.IDLE;
+        this._planResumeAttempts = 0;
+        this.agent.log?.error?.('plan_exit_cleanup_failed', { error: cleanupError });
+      }
+      this._planResumeAttempts = 0;
+    }
   }
 
   get isActive() {
@@ -213,6 +283,38 @@ export class PlanMode {
       content,
       path: this._planFilePath,
     };
+  }
+
+  get transitionState(): PlanTransitionState { return this._transitionState; }
+
+  markPlanSaved(source: string): void {
+    this._transitionState = PlanTransitionState.PLAN_SAVED;
+    this._planResumeAttempts = 0;
+    this.emitTransition({
+      transition: PlanTransition.IDLE_TO_PLAN_SAVED,
+      source,
+      timestamp: Date.now(),
+      metadata: { planId: this._planId, planFilePath: this._planFilePath },
+    });
+  }
+
+  clearTransitionState(transition: PlanTransition, source: string): void {
+    this._transitionState = PlanTransitionState.IDLE;
+    this.emitTransition({
+      transition,
+      source,
+      timestamp: Date.now(),
+      metadata: { planId: this._planId, resumeAttempts: this._planResumeAttempts },
+    });
+    this._planResumeAttempts = 0;
+  }
+
+  incrementResumeAttempts(): number {
+    return ++this._planResumeAttempts;
+  }
+
+  private emitTransition(event: PlanTransitionEvent): void {
+    this.agent.log?.info('plan_transition', event);
   }
 
   private async writeEmptyPlanFile(path: string): Promise<void> {

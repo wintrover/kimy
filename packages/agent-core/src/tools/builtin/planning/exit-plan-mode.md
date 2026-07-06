@@ -1,3 +1,5 @@
+**IMPORTANT: This tool requires NO arguments. Call it immediately with an empty object `{}`. Do NOT generate any text before calling this tool.**
+
 Use this tool when you are in plan mode and have finished writing your plan to the plan file and are ready for user approval.
 
 ## How This Tool Works

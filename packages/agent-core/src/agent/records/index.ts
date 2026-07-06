@@ -7,6 +7,7 @@ import {
   type WireMigration,
   type WireMigrationRecord,
 } from './migration';
+import { getTimestamp } from './timestamp.js';
 import type { AgentRecord, AgentRecordPersistence } from './types';
 
 export * from './types';
@@ -129,6 +130,10 @@ function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
     case 'goal.clear':
       agent.goal.restoreClear(input);
       return;
+    case 'snapshot.checkpoint':
+      // Snapshot checkpoints are informational markers during replay.
+      // Actual snapshot loading is handled by ReplayGateway.
+      break;
   }
 }
 
@@ -156,7 +161,7 @@ export class AgentRecords {
   logRecord(record: AgentRecord): void {
     if (this._restoring !== null) return;
     const stamped: AgentRecord =
-      record.time !== undefined ? record : { ...record, time: Date.now() };
+      record.time !== undefined ? record : { ...record, time: getTimestamp(this._restoring) };
     if (
       this.persistence !== undefined &&
       !this.metadataInitialized &&
@@ -165,7 +170,7 @@ export class AgentRecords {
       this.persistence.append({
         type: 'metadata',
         protocol_version: AGENT_WIRE_PROTOCOL_VERSION,
-        created_at: Date.now(),
+        created_at: getTimestamp(this._restoring),
       });
       this.metadataInitialized = true;
     }

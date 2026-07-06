@@ -1023,6 +1023,10 @@ export class AnthropicChatProvider implements ChatProvider {
       createParams['tools'] = anthropicTools;
     }
 
+    if (options?.tool_choice !== undefined) {
+      createParams['tool_choice'] = options.tool_choice;
+    }
+
     if (this._metadata !== undefined) {
       createParams['metadata'] = this._metadata;
     }

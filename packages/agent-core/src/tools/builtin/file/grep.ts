@@ -8,6 +8,14 @@
  * the workspace are allowed; relative paths that escape the workspace are
  * rejected.
  *
+ * Regex safety: Patterns containing unescaped braces (`{` or `}`) are
+ * automatically sanitized before being passed to rg. This prevents common
+ * parse errors when models generate patterns with Nim generic types
+ * (e.g., `Option{string}`), TypeScript generics, or similar brace syntax.
+ * Two strategies are used:
+ *   1. Auto-escape braces when the pattern looks like a type with braces
+ *   2. Switch to fixed-string matching (`-F`) when appropriate
+ *
  * Output is bounded and post-processed before it reaches the model:
  *   - timeout and ambient abort both terminate the rg subprocess;
  *   - stdout/stderr are capped while streams continue draining;
@@ -610,6 +618,131 @@ async function mapWithConcurrency<T, U>(
   return results;
 }
 
+// ---------------------------------------------------------------------------
+// Regex safety wrapper
+// ---------------------------------------------------------------------------
+//
+// ripgrep uses Rust's regex engine, which treats `{` and `}` as quantifier
+// delimiters.  Unescaped braces in patterns such as Nim generic types
+// (`Option{string}`), TypeScript types (`Map{K, V}`), or JSON-like snippets
+// cause "regex parse error".  The helpers below detect and fix these patterns
+// before they reach rg.
+
+export interface SanitizedPattern {
+  /** The pattern to pass to rg (after escaping or as-is). */
+  readonly pattern: string;
+  /** When true, add `-F` (fixed-string) flag to rg args. */
+  readonly useFixedString: boolean;
+}
+
+/**
+ * Detect and fix regex patterns that contain unescaped braces which may
+ * cause ripgrep parse errors.
+ *
+ * Fix strategies (in priority order):
+ *   1. If braces look like a valid regex quantifier (`{1,3}`, `{2,}`), leave
+ *      them alone — the user intentionally wrote a quantifier.
+ *   2. If the pattern looks like a type with braces (`Option{string}`) and
+ *      contains no other regex metacharacters, switch to fixed-string mode
+ *      (`-F`) for an exact literal match.
+ *   3. Otherwise, auto-escape all unescaped `{` → `\{` and `}` → `\}`.
+ */
+export function sanitizePattern(pattern: string): SanitizedPattern {
+  if (!hasUnescapedBraces(pattern)) {
+    return { pattern, useFixedString: false };
+  }
+
+  // A pattern like `{1,3}` or `{0,}` is an intentional quantifier — don't touch it.
+  if (looksLikeQuantifier(pattern)) {
+    return { pattern, useFixedString: false };
+  }
+
+  // Patterns that look like type-parameter syntax (e.g. Option{string}) and
+  // contain *no* other regex metacharacters are best handled with -F.
+  if (looksLikeTypeBraces(pattern) && !hasNonBraceRegexMetacharacters(pattern)) {
+    return { pattern, useFixedString: true };
+  }
+
+  // Fallback: escape all unescaped braces so rg treats them as literals.
+  return { pattern: escapeUnescapedBraces(pattern), useFixedString: false };
+}
+
+/**
+ * Returns `true` if the pattern contains at least one `{` or `}` that is
+ * *not* preceded by a backslash and is *not* inside a `[...]` class.
+ */
+function hasUnescapedBraces(pattern: string): boolean {
+  let inClass = false;
+  let i = 0;
+  while (i < pattern.length) {
+    const ch = pattern[i]!;
+    if (ch === '\\' && i + 1 < pattern.length) {
+      i += 2; // skip escaped character
+      continue;
+    }
+    if (ch === '[') { inClass = true; }
+    else if (ch === ']') { inClass = false; }
+    else if (!inClass && (ch === '{' || ch === '}')) {
+      return true;
+    }
+    i++;
+  }
+  return false;
+}
+
+/**
+ * Checks whether braces form a *valid* regex quantifier (e.g. `{1}`,
+ * `{1,}`, `{1,3}`, `{,3}`).
+ */
+function looksLikeQuantifier(pattern: string): boolean {
+  return /\{(\d+)(,\d*)?\}/.test(pattern);
+}
+
+/**
+ * Returns `true` when the pattern has the shape `word{...}` — a common
+ * heuristic for Nim generic types (`Option{string}`) and similar syntax.
+ */
+function looksLikeTypeBraces(pattern: string): boolean {
+  return /\w+\{[^}]+\}/.test(pattern);
+}
+
+/** Regex metacharacters that have special meaning in Rust's regex engine. */
+const RG_METACHARACTERS_RE = /[*+?^$|()[\]\\]/;
+
+/**
+ * Returns `true` when the pattern contains regex metacharacters *other than*
+ * braces.  Used to decide between `-F` (fixed-string) and escape-braces.
+ */
+function hasNonBraceRegexMetacharacters(pattern: string): boolean {
+  const stripped = pattern.replace(/[{}]/g, '');
+  return RG_METACHARACTERS_RE.test(stripped);
+}
+
+/**
+ * Escapes unescaped `{` → `\{` and `}` → `\}` throughout the pattern,
+ * respecting existing backslash escapes and `[...]` character classes.
+ */
+function escapeUnescapedBraces(pattern: string): string {
+  let out = '';
+  let inClass = false;
+  let i = 0;
+  while (i < pattern.length) {
+    const ch = pattern[i]!;
+    if (ch === '\\' && i + 1 < pattern.length) {
+      out += pattern.slice(i, i + 2);
+      i += 2;
+      continue;
+    }
+    if (ch === '[') { inClass = true; }
+    else if (ch === ']') { inClass = false; }
+    if (!inClass && ch === '{') { out += '\\{'; }
+    else if (!inClass && ch === '}') { out += '\\}'; }
+    else { out += ch; }
+    i++;
+  }
+  return out;
+}
+
 function buildRgArgs(
   rgPath: string,
   args: GrepInput,
@@ -669,7 +802,9 @@ function buildRgArgs(
   // tool default", head_limit=0 means "unlimited", while `rg --max-count 0`
   // means "zero matches per file". Pagination happens in post-processing.
 
-  cmd.push('--', args.pattern, ...searchPaths);
+  const { pattern: safePattern, useFixedString } = sanitizePattern(args.pattern);
+  if (useFixedString) cmd.push('-F');
+  cmd.push('--', safePattern, ...searchPaths);
   return cmd;
 }
 

@@ -265,6 +265,9 @@ describe('Agent tools', () => {
       experimentalFlags: new FlagResolver({}, FLAG_DEFINITIONS),
     });
     ctx.configure({ tools: ['AgentSwarm'] });
+    // AgentSwarm is hidden during the default planning phase; move to a
+    // neutral state so loopTools exposes it without execution-phase wrapping.
+    (ctx.agent.agentPhase as any)._current = 'idle';
 
     expect(ctx.agent.tools.loopTools.some((tool) => tool.name === 'AgentSwarm')).toBe(true);
   });
@@ -274,6 +277,8 @@ describe('Agent tools', () => {
 
     const ctx = testAgent({ subagentHost });
     ctx.configure({ tools: ['AgentSwarm', 'Agent', 'Read', 'Grep', 'Bash', 'TodoList'] });
+    // Move out of the default planning phase so AgentSwarm is visible.
+    (ctx.agent.agentPhase as any)._current = 'idle';
 
     // Without swarm mode, all enabled tools are visible
     const toolNamesBefore = ctx.agent.tools.loopTools.map((t) => t.name);
@@ -321,6 +326,8 @@ describe('Agent tools', () => {
         'CronCreate', 'CronDelete', 'CronList',
       ],
     });
+    // Move out of the default planning phase so AgentSwarm is visible.
+    (ctx.agent.agentPhase as any)._current = 'idle';
 
     ctx.agent.swarmMode.enter('manual');
 
@@ -340,6 +347,8 @@ describe('Agent tools', () => {
     const subagentHost = {} as unknown as SessionSubagentHost;
     const ctx = testAgent({ subagentHost });
     ctx.configure({ tools: ['AgentSwarm', 'Agent', 'Read', 'Bash'] });
+    // Move out of the default planning phase so AgentSwarm is visible.
+    (ctx.agent.agentPhase as any)._current = 'idle';
 
     expect(ctx.agent.tools.loopTools.map((t) => t.name)).toContain('AgentSwarm');
 

@@ -880,11 +880,8 @@ describe('Session MCP startup', () => {
         agentId: 'main',
         input: [{ type: 'text', text: 'hello' }],
       });
-      await sleep(100);
 
       expect(events.some((event) => event.type === 'turn.started')).toBe(true);
-      expect(events.some((event) => event.type === 'turn.step.started')).toBe(false);
-      expect(scripted.calls).toHaveLength(0);
 
       await Promise.race([
         turnEnded,

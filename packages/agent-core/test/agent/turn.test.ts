@@ -241,10 +241,10 @@ describe('Agent turn flow', () => {
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
       [emit] turn.step.interrupted       { "turnId": 0, "step": 1, "reason": "error", "message": "Unexpected generate call #1" }
-      [emit] turn.ended                  { "turnId": 0, "reason": "failed", "error": { "code": "internal", "message": "Unexpected generate call #1", "name": "Error", "retryable": false, "details": { "turnId": 0 } } }
+      [emit] turn.ended                  { "turnId": 0, "reason": "failed", "error": { "code": "internal", "message": "Unexpected generate call #1", "name": "Error", "retryable": false, "details": { "turnId": 0 }, "_effect": "NONE" } }
     `);
     expect(ctx.newEvents()).toMatchInlineSnapshot(
-      `[emit] error   { "code": "internal", "message": "Unexpected generate call #1", "name": "Error", "retryable": false, "details": { "turnId": 0 } }`,
+      `[emit] error   { "code": "internal", "message": "Unexpected generate call #1", "name": "Error", "retryable": false, "details": { "turnId": 0 }, "_effect": "NONE" }`,
     );
     await ctx.expectResumeMatches();
   });
@@ -339,6 +339,12 @@ describe('Agent turn flow', () => {
     });
     ctx.configure({ tools: ['AgentSwarm'] });
     await ctx.rpc.setPermission({ mode: 'yolo' });
+
+    // The default agentPhase is 'planning', which hides AgentSwarm from
+    // loopTools.  Bypass the filter so the tool is available to the LLM
+    // during the turn and can be executed by preflightToolCall.
+    const swarmTool = (ctx.agent.tools as any).builtinTools.get('AgentSwarm');
+    (ctx.agent.tools as any).loopToolsOverride = swarmTool ? [swarmTool] : undefined;
 
     ctx.mockNextResponse(
       { type: 'text', text: 'I will launch a swarm.' },
@@ -479,10 +485,10 @@ describe('Agent turn flow', () => {
       [wire] turn.prompt              { "input": [ { "type": "text", "text": "Hello without login" } ], "origin": { "kind": "user" }, "time": "<time>" }
       [emit] turn.started             { "turnId": 0, "origin": { "kind": "user" } }
       [wire] context.append_message   { "message": { "role": "user", "content": [ { "type": "text", "text": "Hello without login" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
-      [emit] turn.ended               { "turnId": 0, "reason": "failed", "error": { "code": "model.not_configured", "message": "LLM not set, send \\"/login\\" to login", "name": "KimiError", "details": { "turnId": 0 }, "retryable": false } }
+      [emit] turn.ended               { "turnId": 0, "reason": "failed", "error": { "code": "model.not_configured", "message": "LLM not set, send \\"/login\\" to login", "name": "KimiError", "details": { "turnId": 0 }, "retryable": false, "_effect": "NONE" } }
     `);
     expect(ctx.newEvents()).toMatchInlineSnapshot(
-      `[emit] error   { "code": "model.not_configured", "message": "LLM not set, send \\"/login\\" to login", "name": "KimiError", "details": { "turnId": 0 }, "retryable": false }`,
+      `[emit] error   { "code": "model.not_configured", "message": "LLM not set, send \\"/login\\" to login", "name": "KimiError", "details": { "turnId": 0 }, "retryable": false, "_effect": "NONE" }`,
     );
   });
 

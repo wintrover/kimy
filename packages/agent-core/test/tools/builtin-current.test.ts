@@ -172,10 +172,16 @@ describe('current builtin file and shell tools', () => {
         new_string: 'delta',
       }).success,
     ).toBe(true);
-    expect(tool.parameters).toMatchObject({
-      type: 'object',
-      properties: { old_string: { type: 'string' } },
-    });
+    // EditInputSchema is now a z.union([StringReplace, StructuralMutation]),
+    // so the JSON schema is an anyOf with two object variants.
+    const editSchema = tool.parameters as Record<string, unknown>;
+    expect(editSchema.anyOf).toBeDefined();
+    const anyOf = editSchema.anyOf as Array<Record<string, unknown>>;
+    expect(anyOf.length).toBeGreaterThanOrEqual(1);
+    const stringReplaceVariant = anyOf.find(
+      (v) => (v.properties as Record<string, unknown>)?.old_string !== undefined,
+    );
+    expect(stringReplaceVariant).toBeDefined();
 
     const result = await executeTool(tool,
       context({ path: '/workspace/a.txt', old_string: 'gamma', new_string: 'delta' }),

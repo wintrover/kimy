@@ -55,6 +55,12 @@ export interface KosongLLMConfig {
    * final cap is applied to each request.
    */
   readonly completionBudgetConfig?: CompletionBudgetConfig | undefined;
+  /**
+   * Optional session identifier. When present, used to derive an OpenAI
+   * `prompt_cache_key` that enables prefix caching across requests within
+   * the same session.
+   */
+  readonly sessionId?: string | undefined;
 }
 
 export class KosongLLM implements LLM {
@@ -65,6 +71,7 @@ export class KosongLLM implements LLM {
   private readonly provider: ChatProvider;
   private readonly generate: GenerateFn;
   private readonly completionBudgetConfig: CompletionBudgetConfig | undefined;
+  private readonly sessionId: string | undefined;
 
   constructor(config: KosongLLMConfig) {
     this.provider = config.provider;
@@ -73,6 +80,7 @@ export class KosongLLM implements LLM {
     this.capability = config.capability;
     this.generate = config.generate ?? kosongGenerate;
     this.completionBudgetConfig = config.completionBudgetConfig;
+    this.sessionId = config.sessionId;
   }
 
   async chat(params: LLMChatParams): Promise<LLMChatResponse> {
@@ -99,11 +107,13 @@ export class KosongLLM implements LLM {
       budget: this.completionBudgetConfig,
       capability: this.capability,
     });
+    const cacheKey = this.sessionId ? `session-${this.sessionId}` : undefined;
     const options: GenerateOptionsWithRequestLogFields = {
       signal: params.signal,
       onRequestStart: markRequestStart,
       onStreamEnd: markStreamEnd,
       requestLogFields: params.requestLogFields,
+      prompt_cache_key: cacheKey,
     };
 
     const result = await this.generate(

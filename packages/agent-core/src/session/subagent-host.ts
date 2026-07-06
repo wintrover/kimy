@@ -107,6 +107,57 @@ export type ProvisioningPreconditionResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly reason: string };
 
+/**
+ * Contract data injected into a subagent's system prompt during configuration.
+ * Defines the subagent's task scope, expected behavior, and context boundaries
+ * so the child agent has deterministic knowledge of its role in the swarm.
+ */
+export interface SubagentContract {
+  /** The task description / prompt for this subagent */
+  readonly task: string;
+  /** The specific swarm item this subagent is responsible for */
+  readonly item?: string;
+  /** The subagent's role/profile name */
+  readonly role: string;
+  /** Swarm index for ordering context */
+  readonly index?: number;
+}
+
+/**
+ * Build a subagent contract from spawn options.
+ * The contract captures the deterministic task specification that will be
+ * injected into the child's context before any user-provided prompt content.
+ */
+function buildSubagentContract(options: SpawnSubagentOptions): SubagentContract {
+  return {
+    task: options.description,
+    item: options.swarmItem,
+    role: options.profileName,
+    index: options.swarmIndex,
+  };
+}
+
+/**
+ * Render a subagent contract as a structured system reminder.
+ * Uses XML-like tags for clear machine-readable boundaries while remaining
+ * human-readable in context windows.
+ */
+function renderContractAsReminder(contract: SubagentContract): string {
+  const lines = [
+    `<subagent_contract>`,
+    `<role>${contract.role}</role>`,
+    `<task>${contract.task}</task>`,
+  ];
+  if (contract.item !== undefined) {
+    lines.push(`<item>${contract.item}</item>`);
+  }
+  if (contract.index !== undefined) {
+    lines.push(`<index>${String(contract.index)}</index>`);
+  }
+  lines.push(`</subagent_contract>`);
+  return lines.join('\n');
+}
+
 export class SessionSubagentHost {
   private _runtimeSubagentModel: string | null = null;
   private readonly circuitBreaker = new ProviderCircuitBreaker();
@@ -168,10 +219,11 @@ export class SessionSubagentHost {
       { parentAgentId: this.ownerAgentId, swarmItem: options.swarmItem },
     );
     try {
+      const contract = buildSubagentContract(options);
       const completion = this.runWithActiveChild(id, options, async (runOptions) => {
         this.emitSubagentSpawned(parent, id, profile.name, runOptions);
         try {
-          await this.configureChild(parent, agent, profile, context);
+          await this.configureChild(parent, agent, profile, context, contract);
           return await this.runPromptTurn(parent, id, agent, profile.name, runOptions, context);
         } catch (error) {
           this.emitSubagentFailed(parent, id, runOptions, error);
@@ -550,6 +602,7 @@ export class SessionSubagentHost {
     child: Agent,
     profile: ResolvedAgentProfile,
     context?: BatchExecutionContext,
+    contract?: SubagentContract,
   ): Promise<void> {
     child.config.update({
       cwd: parent.config.cwd,
@@ -564,6 +617,18 @@ export class SessionSubagentHost {
       { additionalDirs: child.getAdditionalDirs(), agentType: child.type },
     );
     child.useProfile(profile, promptContext);
+
+    // Inject contract data into the child's context AFTER the system prompt
+    // (set by useProfile) but BEFORE any user-provided prompt template content
+    // is sent in runPromptTurn. This ensures the child has deterministic
+    // knowledge of its task scope and role before receiving its prompt.
+    if (contract !== undefined) {
+      child.context.appendSystemReminder(renderContractAsReminder(contract), {
+        kind: 'injection',
+        variant: 'subagent_contract',
+      });
+    }
+
     child.tools.inheritUserTools(parent.tools);
 
     // Sub-agents must not have access to orchestration tools (e.g. AgentSwarm)

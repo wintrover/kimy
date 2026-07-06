@@ -612,6 +612,10 @@ export class OpenAILegacyChatProvider implements ChatProvider {
       createParams['reasoning_effort'] = reasoningEffort;
     }
 
+    if (options?.prompt_cache_key) {
+      createParams['prompt_cache_key'] = options.prompt_cache_key;
+    }
+
     try {
       const client = this._createClient(options?.auth);
       const response = (await client.chat.completions.create(

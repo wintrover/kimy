@@ -36,6 +36,7 @@ import { normalize } from 'pathe';
 import { z } from 'zod';
 
 import type { BuiltinTool } from '../../../agent/tool';
+import { flags } from '../../../flags';
 import { ToolAccesses } from '../../../loop/tool-access';
 import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import { isWithinDirectory, resolvePathAccessPath } from '../../policies/path-access';
@@ -132,8 +133,7 @@ export class GlobTool implements BuiltinTool<GlobInput> {
     }
     const searchRoots = [path ?? this.workspace.workspaceDir];
 
-    const detailParts: string[] = [];
-    detailParts.push(`pattern: ${args.pattern}`);
+    const detailParts: string[] = [`pattern: ${args.pattern}`];
     if (args.path !== undefined) {
       detailParts.push(`path: ${args.path}`);
     }
@@ -275,7 +275,11 @@ export class GlobTool implements BuiltinTool<GlobInput> {
         lines.push(`[Truncated at ${String(MAX_MATCHES)} matches — ${String(seen.size)} matched so far, use a more specific pattern]`);
         lines.push(`Only the first ${String(MAX_MATCHES)} matches are returned.`);
       }
-      lines.push(...displayLines);
+      if (flags.enabled('semantic_compaction')) {
+        lines.push(compactPathsToTree(displayLines));
+      } else {
+        lines.push(...displayLines);
+      }
       if (!truncated && entries.length === MAX_MATCHES) {
         lines.push(`Found ${String(entries.length)} matches`);
       }
@@ -426,4 +430,97 @@ function splitTopLevelCommas(s: string): string[] {
   }
   parts.push(s.slice(last));
   return parts;
+}
+
+// ── Semantic compression: deterministic tree formatter ──────────────
+
+const COMPACT_META_COMMENT =
+  '[Note: The following paths are compressed into a deterministic tree structure to optimize context window. ' +
+  '"dir/ → [a, b]" means dir/a, dir/b are files inside dir/.]';
+
+/** Maximum depth at which directories are still grouped. */
+const COMPACT_MAX_DEPTH = 5;
+
+/** Minimum files in a directory to trigger group notation. */
+const COMPACT_GROUP_THRESHOLD = 3;
+
+type TreeNode = { files: string[]; children: Map<string, TreeNode> };
+
+/**
+ * Compress a list of file paths into a compact deterministic tree.
+ *
+ * Directories with 3+ direct files are rendered as
+ * `dir/ → [a.ts, b.ts, c.ts]`. Fewer than 3 files in a directory are
+ * listed individually. Recursion stops at `COMPACT_MAX_DEPTH` levels.
+ *
+ * Adaptive: when the average path length is < 30 chars or the total
+ * result set is ≤ 10 items, the original list is returned unchanged
+ * (compression would add more overhead than it saves).
+ *
+ * A one-line meta comment is prepended when compression is active.
+ */
+export function compactPathsToTree(paths: string[]): string {
+  if (paths.length === 0) return '';
+
+  // Adaptive bypass: skip compression for small / short-path result sets.
+  if (paths.length <= 10) return paths.join('\n');
+  const avgLen = paths.reduce((sum, p) => sum + p.length, 0) / paths.length;
+  if (avgLen < 30) return paths.join('\n');
+
+  const sorted = [...paths].toSorted();
+
+  const root: TreeNode = { files: [], children: new Map() };
+
+  // Build tree — split each path on `/` and distribute into nodes.
+  for (const p of sorted) {
+    const parts = p.split('/');
+    let node = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const seg = parts[i]!;
+      if (!node.children.has(seg)) {
+        node.children.set(seg, { files: [], children: new Map() });
+      }
+      node = node.children.get(seg)!;
+    }
+    // The last segment is the filename (or empty string for trailing-slash).
+    node.files.push(parts.at(-1)!);
+  }
+
+  const lines: string[] = [COMPACT_META_COMMENT];
+  serializeNode(root, lines, 0, false);
+  return lines.join('\n');
+}
+
+/**
+ * Recursively serialize a tree node into output lines.
+ *
+ * When `skipDirectFiles` is true, only child directories are emitted
+ * (the node's direct files were already shown in a parent bracket).
+ */
+function serializeNode(node: TreeNode, out: string[], depth: number, skipDirectFiles: boolean): void {
+  // Emit direct files (unless they were already shown in a group bracket).
+  if (!skipDirectFiles) {
+    for (const f of [...node.files].toSorted()) {
+      out.push(f);
+    }
+  }
+
+  // Emit child directories.
+  for (const name of [...node.children.keys()].toSorted()) {
+    const child = node.children.get(name)!;
+    const directCount = child.files.length;
+    const shouldGroup =
+      depth < COMPACT_MAX_DEPTH && directCount >= COMPACT_GROUP_THRESHOLD;
+
+    if (shouldGroup) {
+      // Emit bracket notation for the direct files.
+      const fileNames = [...child.files].toSorted();
+      out.push(`${name}/ → [${fileNames.join(', ')}]`);
+      // Recurse to handle subdirectories (skip re-emitting direct files).
+      serializeNode(child, out, depth + 1, true);
+    } else {
+      out.push(`${name}/`);
+      serializeNode(child, out, depth + 1, false);
+    }
+  }
 }

@@ -1,0 +1,1 @@
+cmd_Release/nim_agent_core.node := ln -f "Release/obj.target/nim_agent_core.node" "Release/nim_agent_core.node" 2>/dev/null || (rm -rf "Release/nim_agent_core.node" && cp -af "Release/obj.target/nim_agent_core.node" "Release/nim_agent_core.node")

@@ -3956,6 +3956,161 @@ describe('Permission rule helpers', () => {
 
 });
 
+describe('AgentPhase system', () => {
+  // AgentSwarmTool and CommitAndPrepareSwarmTool are gated behind subagentHost
+  // in initializeBuiltinTools(); provide a mock so the tools register in builtinTools.
+  const mockSubagentHost = {} as any;
+
+  it('planning phase excludes AgentSwarm from loopTools', () => {
+    const ctx = testAgent({ subagentHost: mockSubagentHost });
+    ctx.configure({ tools: ['AgentSwarm', 'TodoList', 'CommitAndPrepareSwarm'] });
+    expect(ctx.agent.agentPhase.current).toBe('planning');
+    const toolNames = ctx.agent.tools.loopTools.map((t) => t.name);
+    expect(toolNames).not.toContain('AgentSwarm');
+  });
+
+  it('planning phase includes CommitAndPrepareSwarm in loopTools', () => {
+    const ctx = testAgent({ subagentHost: mockSubagentHost });
+    ctx.configure({ tools: ['AgentSwarm', 'TodoList', 'CommitAndPrepareSwarm'] });
+    const toolNames = ctx.agent.tools.loopTools.map((t) => t.name);
+    expect(toolNames).toContain('CommitAndPrepareSwarm');
+  });
+
+  it('transitionToExecution switches to execution and stores params', () => {
+    const ctx = testAgent({ subagentHost: mockSubagentHost });
+    ctx.configure({ tools: ['AgentSwarm', 'CommitAndPrepareSwarm'] });
+    expect(ctx.agent.agentPhase.current).toBe('planning');
+
+    const params = {
+      description: 'Review files',
+      prompt_template: 'Review {{item}}',
+      items: ['src/a.ts', 'src/b.ts'],
+    };
+    ctx.agent.agentPhase.transitionToExecution(params);
+
+    expect(ctx.agent.agentPhase.current).toBe('execution');
+    expect(ctx.agent.agentPhase.pendingSwarmParams).toEqual(params);
+  });
+
+  it('execution phase exposes AgentSwarm wrapper in loopTools with empty parameters schema', () => {
+    const ctx = testAgent({ subagentHost: mockSubagentHost });
+    ctx.configure({ tools: ['AgentSwarm', 'CommitAndPrepareSwarm', 'TodoList'] });
+
+    ctx.agent.agentPhase.transitionToExecution({
+      description: 'Review files',
+      prompt_template: 'Review {{item}}',
+      items: ['src/a.ts', 'src/b.ts'],
+    });
+
+    const loopTools = ctx.agent.tools.loopTools;
+    const toolNames = loopTools.map((t) => t.name);
+    expect(toolNames).toEqual(['AgentSwarm']);
+
+    const swarmTool = loopTools[0]!;
+    expect(swarmTool.parameters).toEqual({
+      type: 'object',
+      properties: {},
+    });
+  });
+
+  it('resetToPlanning restores planning phase and clears params', () => {
+    const ctx = testAgent();
+    ctx.configure({ tools: ['AgentSwarm', 'CommitAndPrepareSwarm'] });
+
+    ctx.agent.agentPhase.transitionToExecution({
+      description: 'Review files',
+      prompt_template: 'Review {{item}}',
+      items: ['src/a.ts', 'src/b.ts'],
+    });
+    expect(ctx.agent.agentPhase.current).toBe('execution');
+
+    ctx.agent.agentPhase.resetToPlanning();
+    expect(ctx.agent.agentPhase.current).toBe('planning');
+    expect(ctx.agent.agentPhase.pendingSwarmParams).toBeNull();
+  });
+
+  it('TodoList and CommitAndPrepareSwarm coexist in planning phase', () => {
+    const ctx = testAgent({ subagentHost: mockSubagentHost });
+    ctx.configure({ tools: ['AgentSwarm', 'TodoList', 'CommitAndPrepareSwarm'] });
+    const toolNames = ctx.agent.tools.loopTools.map((t) => t.name);
+    expect(toolNames).toContain('TodoList');
+    expect(toolNames).toContain('CommitAndPrepareSwarm');
+    expect(toolNames).not.toContain('AgentSwarm');
+  });
+
+  it('markEscapeAttempted returns true once then false', () => {
+    const ctx = testAgent();
+    expect(ctx.agent.agentPhase.markEscapeAttempted()).toBe(true);
+    expect(ctx.agent.agentPhase.markEscapeAttempted()).toBe(false);
+  });
+
+  it('second transitionToExecution overwrites first params', () => {
+    const ctx = testAgent();
+    ctx.configure({ tools: ['AgentSwarm', 'CommitAndPrepareSwarm'] });
+
+    const params1 = {
+      description: 'First',
+      prompt_template: 'First {{item}}',
+      items: ['a.ts'],
+    };
+    const params2 = {
+      description: 'Second',
+      prompt_template: 'Second {{item}}',
+      items: ['b.ts', 'c.ts'],
+    };
+
+    ctx.agent.agentPhase.transitionToExecution(params1);
+    ctx.agent.agentPhase.transitionToExecution(params2);
+
+    expect(ctx.agent.agentPhase.current).toBe('execution');
+    expect(ctx.agent.agentPhase.pendingSwarmParams).toEqual(params2);
+  });
+
+  it('transitionToExecution resets escape guard', () => {
+    const ctx = testAgent();
+    ctx.configure({ tools: ['AgentSwarm', 'CommitAndPrepareSwarm'] });
+
+    ctx.agent.agentPhase.markEscapeAttempted();
+    expect(ctx.agent.agentPhase.markEscapeAttempted()).toBe(false);
+
+    ctx.agent.agentPhase.transitionToExecution({
+      description: 'Review',
+      prompt_template: 'Review {{item}}',
+      items: ['a.ts'],
+    });
+
+    expect(ctx.agent.agentPhase.markEscapeAttempted()).toBe(true);
+  });
+
+  it('resetToPlanning resets escape guard', () => {
+    const ctx = testAgent();
+    ctx.configure({ tools: ['AgentSwarm', 'CommitAndPrepareSwarm'] });
+
+    ctx.agent.agentPhase.markEscapeAttempted();
+    expect(ctx.agent.agentPhase.markEscapeAttempted()).toBe(false);
+
+    ctx.agent.agentPhase.resetToPlanning();
+    expect(ctx.agent.agentPhase.markEscapeAttempted()).toBe(true);
+  });
+
+  it('isExecution matches current phase state', () => {
+    const ctx = testAgent();
+    ctx.configure({ tools: ['AgentSwarm', 'CommitAndPrepareSwarm'] });
+
+    expect(ctx.agent.agentPhase.isExecution).toBe(false);
+
+    ctx.agent.agentPhase.transitionToExecution({
+      description: 'Review',
+      prompt_template: 'Review {{item}}',
+      items: ['a.ts'],
+    });
+    expect(ctx.agent.agentPhase.isExecution).toBe(true);
+
+    ctx.agent.agentPhase.resetToPlanning();
+    expect(ctx.agent.agentPhase.isExecution).toBe(false);
+  });
+});
+
 function bashCall(): ToolCall {
   return {
     type: 'function',

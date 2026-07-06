@@ -10,6 +10,10 @@ import type { ContextMessage } from '../../../src/agent/context';
 import { testAgent } from '../harness/agent';
 
 describe('AgentRecords persistence metadata', () => {
+  it('uses protocol version 1.5', () => {
+    expect(AGENT_WIRE_PROTOCOL_VERSION).toBe('1.5');
+  });
+
   it('writes metadata before the first persisted record', async () => {
     const persistence = new InMemoryAgentRecordPersistence();
     const records = testAgent({ persistence }).agent.records;
@@ -305,6 +309,28 @@ describe('AgentRecords persistence metadata', () => {
 
     expect(agent.goal.getGoal().goal).toBeNull();
     expect(agent.context.history).toHaveLength(0);
+  });
+  it('restores snapshot.checkpoint records as no-op informational markers', async () => {
+    const persistence = new InMemoryAgentRecordPersistence([
+      { type: 'metadata', protocol_version: AGENT_WIRE_PROTOCOL_VERSION, created_at: 1 },
+      { type: 'forked', time: 2 },
+      {
+        type: 'snapshot.checkpoint',
+        epoch: 1,
+        wireRecordCount: 42,
+        snapshotFile: '/tmp/snapshots/epoch-1.json',
+        sha256: 'abc123',
+      },
+    ]);
+    const { agent } = testAgent({ persistence });
+
+    await expect(agent.records.replay()).resolves.toEqual({ warning: undefined });
+    expect(agent.goal.getGoal().goal).toBeNull();
+    expect(persistence.records.map((record) => record.type)).toEqual([
+      'metadata',
+      'forked',
+      'snapshot.checkpoint',
+    ]);
   });
 });
 

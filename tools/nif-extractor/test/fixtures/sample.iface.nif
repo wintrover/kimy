@@ -1,0 +1,8 @@
+; Sample .iface.nif file for testing
+(iface "z3.solveConstraint" "a3f8c1d2e5b4")
+(iface "z3.addConstraint" "b7e9f2a1c3d6")
+(iface "z3.withSolver" "c4d5e6f7a8b9")
+(iface "z3.defineSort" "d1e2f3a4b5c6")
+(iface "z3.Constraint" "e7f8a9b0c1d2")
+(iface "z3.Solver" "f3a4b5c6d7e8")
+(iface "z3.maxTimeout" "a1b2c3d4e5f6")

@@ -831,8 +831,9 @@ async function dispatchToolCall(
  */
 function isMixedAgentSwarmBatch(toolCalls: readonly ToolCall[]): boolean {
   if (toolCalls.length <= 1) return false;
-  const hasAgentSwarm = toolCalls.some((tc) => tc.name === 'AgentSwarm');
-  if (!hasAgentSwarm) return false;
+  const SWARM_TOOLS = new Set(['AgentSwarm', 'CommitAndPrepareSwarm']);
+  const hasSwarmTool = toolCalls.some((tc) => SWARM_TOOLS.has(tc.name));
+  if (!hasSwarmTool) return false;
   return toolCalls.length > 1;
 }
 

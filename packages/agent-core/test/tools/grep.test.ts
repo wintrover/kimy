@@ -3,7 +3,13 @@ import { Readable, type Writable } from 'node:stream';
 import type { KaosProcess, StatResult } from '@moonshot-ai/kaos';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { type GrepInput, GrepInputSchema, GrepTool } from '../../src/tools/builtin/file/grep';
+import {
+  type GrepInput,
+  GrepInputSchema,
+  GrepTool,
+  sanitizePattern,
+  type SanitizedPattern,
+} from '../../src/tools/builtin/file/grep';
 import { SENSITIVE_DOT_VARIANT_SUFFIXES } from '../../src/tools/policies/sensitive';
 import { ensureRgPath } from '../../src/tools/support/rg-locator';
 import type { WorkspaceConfig } from '../../src/tools/support/workspace';
@@ -1898,5 +1904,69 @@ describe('GrepTool', () => {
 
     expect(result).toEqual({ isError: true, output: 'Aborted before search started' });
     expect(exec).not.toHaveBeenCalled();
+  });
+});
+
+describe('sanitizePattern', () => {
+  it('passes patterns without braces through unchanged', () => {
+    expect(sanitizePattern('hello world')).toEqual({ pattern: 'hello world', useFixedString: false });
+  });
+
+  it('passes escaped braces through unchanged', () => {
+    expect(sanitizePattern('\\{hello\\}')).toEqual({
+      pattern: '\\{hello\\}',
+      useFixedString: false,
+    });
+  });
+
+  it('passes valid regex quantifiers through unchanged', () => {
+    expect(sanitizePattern('{1,3}')).toEqual({ pattern: '{1,3}', useFixedString: false });
+    expect(sanitizePattern('{0,}')).toEqual({ pattern: '{0,}', useFixedString: false });
+    expect(sanitizePattern('{5}')).toEqual({ pattern: '{5}', useFixedString: false });
+    expect(sanitizePattern('x{2,5}y')).toEqual({ pattern: 'x{2,5}y', useFixedString: false });
+  });
+
+  it('passes braces inside character classes through unchanged', () => {
+    expect(sanitizePattern('[{}]')).toEqual({ pattern: '[{}]', useFixedString: false });
+  });
+
+  it('switches to fixed-string mode for type-like patterns without other metacharacters', () => {
+    expect(sanitizePattern('Option{string}')).toEqual({
+      pattern: 'Option{string}',
+      useFixedString: true,
+    });
+    expect(sanitizePattern('Map{K, V}')).toEqual({
+      pattern: 'Map{K, V}',
+      useFixedString: true,
+    });
+  });
+
+  it('escapes unescaped braces when other metacharacters are present', () => {
+    expect(sanitizePattern('Option{string}.*')).toEqual({
+      pattern: 'Option\\{string\\}.*',
+      useFixedString: false,
+    });
+    expect(sanitizePattern('foo{bar}+')).toEqual({
+      pattern: 'foo\\{bar\\}+',
+      useFixedString: false,
+    });
+  });
+
+  it('handles mixed escaped and unescaped braces', () => {
+    expect(sanitizePattern('\\{a}b{c}')).toEqual({
+      pattern: '\\{a\\}b\\{c\\}',
+      useFixedString: false,
+    });
+  });
+
+  it('handles standalone unescaped braces', () => {
+    expect(sanitizePattern('{')).toEqual({
+      pattern: '\\{',
+      useFixedString: false,
+    });
+    expect(sanitizePattern('}')).toEqual({
+      pattern: '\\}',
+      useFixedString: false,
+    });
   });
 });

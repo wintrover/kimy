@@ -103,9 +103,19 @@ describe('Session.init', () => {
         role: 'user',
         content: [
           expect.objectContaining({
+            text: expect.stringContaining('subagent_contract'),
+          }),
+        ],
+        toolCalls: [],
+      },
+      {
+        role: 'user',
+        content: [
+          expect.objectContaining({
             text: expect.stringContaining('Task requirements:'),
           }),
         ],
+        toolCalls: [],
       },
     ]);
 

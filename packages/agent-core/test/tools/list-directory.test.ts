@@ -288,3 +288,189 @@ describe('listDirectory', () => {
     expect(seenDirs).toEqual(['/w', '/w/src']);
   });
 });
+
+describe('listDirectory maxDepth', () => {
+  it('renders 3 levels deep when maxDepth is 3', async () => {
+    const kaos = createFakeKaos({
+      iterdir: async function* (p: string) {
+        if (p === '/w') {
+          yield '/w/src';
+        } else if (p === '/w/src') {
+          yield '/w/src/components';
+        } else if (p === '/w/src/components') {
+          yield '/w/src/components/Button.tsx';
+          yield '/w/src/components/Header.tsx';
+        }
+      } as unknown as Kaos['iterdir'],
+      stat: (async (p: string) => {
+        const isDir =
+          p.endsWith('/src') || p.endsWith('/components');
+        return {
+          stMode: isDir ? 0o040_755 : 0o100_644,
+          stIno: 1,
+          stDev: 1,
+          stNlink: 1,
+          stUid: 0,
+          stGid: 0,
+          stSize: 1,
+          stAtime: 0,
+          stMtime: 0,
+          stCtime: 0,
+        };
+      }) as unknown as Kaos['stat'],
+    });
+
+    const tree = await listDirectory(kaos, '/w', { maxDepth: 3 });
+    expect(tree).toContain('src/');
+    expect(tree).toContain('components/');
+    expect(tree).toContain('Button.tsx');
+    expect(tree).toContain('Header.tsx');
+  });
+
+  it('stops at maxDepth and shows deeper dirs as collapsed', async () => {
+    const kaos = createFakeKaos({
+      iterdir: async function* (p: string) {
+        if (p === '/w') {
+          yield '/w/src';
+        } else if (p === '/w/src') {
+          yield '/w/src/deep';
+        } else if (p === '/w/src/deep') {
+          yield '/w/src/deep/file.txt';
+        }
+      } as unknown as Kaos['iterdir'],
+      stat: (async (p: string) => {
+        const isDir =
+          p.endsWith('/src') || p.endsWith('/deep');
+        return {
+          stMode: isDir ? 0o040_755 : 0o100_644,
+          stIno: 1,
+          stDev: 1,
+          stNlink: 1,
+          stUid: 0,
+          stGid: 0,
+          stSize: 1,
+          stAtime: 0,
+          stMtime: 0,
+          stCtime: 0,
+        };
+      }) as unknown as Kaos['stat'],
+    });
+
+    const tree = await listDirectory(kaos, '/w', { maxDepth: 1 });
+    expect(tree).toContain('src/');
+    expect(tree).toContain('deep/');
+    expect(tree).not.toContain('file.txt');
+  });
+});
+
+describe('listDirectory skipDirs', () => {
+  it('skips listed directory names entirely', async () => {
+    const seenDirs: string[] = [];
+    const kaos = createFakeKaos({
+      iterdir: async function* (p: string) {
+        seenDirs.push(p);
+        if (p === '/w') {
+          yield '/w/node_modules';
+          yield '/w/src';
+        } else if (p === '/w/src') {
+          yield '/w/src/index.ts';
+        }
+      } as unknown as Kaos['iterdir'],
+      stat: (async (p: string) => {
+        const isDir =
+          p.endsWith('/node_modules') || p.endsWith('/src');
+        return {
+          stMode: isDir ? 0o040_755 : 0o100_644,
+          stIno: 1,
+          stDev: 1,
+          stNlink: 1,
+          stUid: 0,
+          stGid: 0,
+          stSize: 1,
+          stAtime: 0,
+          stMtime: 0,
+          stCtime: 0,
+        };
+      }) as unknown as Kaos['stat'],
+    });
+
+    const tree = await listDirectory(kaos, '/w', {
+      skipDirs: new Set(['node_modules']),
+    });
+    expect(tree).toContain('node_modules/');
+    expect(tree).toContain('src/');
+    expect(tree).toContain('index.ts');
+    expect(seenDirs).not.toContain('/w/node_modules');
+    expect(seenDirs).toContain('/w/src');
+  });
+});
+
+describe('listDirectory maxEntries', () => {
+  it('collapses directories exceeding maxEntries with a count summary', async () => {
+    const kaos = createFakeKaos({
+      iterdir: async function* (p: string) {
+        if (p === '/w') {
+          yield '/w/big-dir';
+          yield '/w/small-dir';
+        } else if (p === '/w/big-dir') {
+          for (let i = 0; i < 60; i++) {
+            yield `/w/big-dir/file_${String(i).padStart(2, '0')}.txt`;
+          }
+        } else if (p === '/w/small-dir') {
+          yield '/w/small-dir/a.txt';
+        }
+      } as unknown as Kaos['iterdir'],
+      stat: (async (p: string) => {
+        const isDir =
+          p.endsWith('/big-dir') || p.endsWith('/small-dir');
+        return {
+          stMode: isDir ? 0o040_755 : 0o100_644,
+          stIno: 1,
+          stDev: 1,
+          stNlink: 1,
+          stUid: 0,
+          stGid: 0,
+          stSize: 1,
+          stAtime: 0,
+          stMtime: 0,
+          stCtime: 0,
+        };
+      }) as unknown as Kaos['stat'],
+    });
+
+    const tree = await listDirectory(kaos, '/w', { maxEntries: 50, maxDepth: 3 });
+    expect(tree).toContain('big-dir/');
+    expect(tree).toContain('(60 entries)');
+    expect(tree).not.toContain('file_00.txt');
+    expect(tree).toContain('small-dir/');
+    expect(tree).toContain('a.txt');
+  });
+
+  it('does not collapse the root level even if it exceeds maxEntries', async () => {
+    const kaos = createFakeKaos({
+      iterdir: async function* (_p: string) {
+        for (let i = 0; i < 60; i++) {
+          yield `/w/file_${String(i).padStart(2, '0')}.txt`;
+        }
+      } as unknown as Kaos['iterdir'],
+      stat: (async () => ({
+        stMode: 0o100_644,
+        stIno: 1,
+        stDev: 1,
+        stNlink: 1,
+        stUid: 0,
+        stGid: 0,
+        stSize: 1,
+        stAtime: 0,
+        stMtime: 0,
+        stCtime: 0,
+      })) as unknown as Kaos['stat'],
+    });
+
+    const tree = await listDirectory(kaos, '/w', { maxEntries: 5 });
+    // Root level should NOT be collapsed — only the width cap applies
+    expect(tree).toContain('file_00.txt');
+    expect(tree).not.toContain('(60 entries)');
+    expect(tree).toContain('... and 30 more');
+  });
+});

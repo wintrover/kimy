@@ -3,7 +3,10 @@ import { dirname, join } from 'pathe';
 import type { Kaos } from '@moonshot-ai/kaos';
 
 import { normalizeAdditionalDirs } from '../config';
-import { listDirectory } from '../tools/support/list-directory';
+import {
+  listDirectory,
+  type ListDirectoryOptions,
+} from '../tools/support/list-directory';
 import type { SystemPromptContext } from './types';
 
 // Soft budget for the combined AGENTS.md content injected into the system
@@ -15,6 +18,28 @@ import type { SystemPromptContext } from './types';
 const AGENTS_MD_RECOMMENDED_MAX_BYTES = 32 * 1024;
 const S_IFMT = 0o170000;
 const S_IFREG = 0o100000;
+
+/** Directories to skip when rendering the system-prompt cwd listing. */
+const SYSTEM_PROMPT_SKIP_DIRS: ReadonlySet<string> = new Set([
+  'node_modules',
+  '.git',
+  '.dist',
+  'dist',
+  'build',
+  '.next',
+  '.nuxt',
+  '__pycache__',
+  '.venv',
+  'target',
+]);
+
+/** Options for the system-prompt directory listing. */
+const SYSTEM_PROMPT_LIST_DIR_OPTIONS: ListDirectoryOptions = {
+  collapseHiddenDirs: true,
+  maxDepth: 4,
+  skipDirs: SYSTEM_PROMPT_SKIP_DIRS,
+  maxEntries: 50,
+};
 
 export interface PreparedSystemPromptContext
   extends Pick<SystemPromptContext, 'cwdListing' | 'agentsMd' | 'additionalDirsInfo'> {
@@ -43,7 +68,7 @@ export async function prepareSystemPromptContext(
 ): Promise<PreparedSystemPromptContext> {
   const additionalDirs = normalizeAdditionalDirs(options?.additionalDirs ?? []);
   const [cwdListing, agentsMdResult, additionalDirsInfo] = await Promise.all([
-    listDirectory(kaos, undefined, { collapseHiddenDirs: true }),
+    listDirectory(kaos, undefined, SYSTEM_PROMPT_LIST_DIR_OPTIONS),
     loadAgentsMdForRoots(kaos, brandHome, [kaos.getcwd()]),
     loadAdditionalDirsInfo(kaos, additionalDirs),
   ]);
@@ -130,7 +155,11 @@ async function loadAdditionalDirsInfo(
 ): Promise<string> {
   const sections = await Promise.all(
     additionalDirs.map(async (dir) => {
-      const listing = await listDirectory(kaos.withCwd(dir));
+      const listing = await listDirectory(
+        kaos.withCwd(dir),
+        undefined,
+        SYSTEM_PROMPT_LIST_DIR_OPTIONS,
+      );
       return `### ${dir}\n${listing}`;
     }),
   );

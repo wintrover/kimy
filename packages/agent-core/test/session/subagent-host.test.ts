@@ -308,12 +308,12 @@ describe('SessionSubagentHost', () => {
       'Grep',
       'Read',
     ]);
-    expect(child.llmCalls[0]?.history).toMatchObject([
-      {
+    expect(child.llmCalls[0]?.history).toContainEqual(
+      expect.objectContaining({
         role: 'user',
         content: [{ type: 'text', text: 'Find the cause' }],
-      },
-    ]);
+      }),
+    );
   });
 
   it('inherits active parent user tools when spawning a subagent', async () => {
@@ -408,12 +408,12 @@ describe('SessionSubagentHost', () => {
       'Read',
       'Write',
     ]);
-    expect(child.llmCalls[0]?.history).toMatchObject([
-      {
+    expect(child.llmCalls[0]?.history).toContainEqual(
+      expect.objectContaining({
         role: 'user',
         content: [{ type: 'text', text: 'Implement the fix' }],
-      },
-    ]);
+      }),
+    );
   });
 
   it('removes orchestration tools (e.g. AgentSwarm) from the child agent', async () => {
@@ -916,7 +916,7 @@ describe('SessionSubagentHost', () => {
     });
     await handle.completion;
 
-    expect(child.llmCalls[0]?.history[0]).toMatchObject({
+    expect(child.llmCalls[0]?.history[1]).toMatchObject({
       role: 'user',
       content: [
         {
@@ -949,7 +949,7 @@ describe('SessionSubagentHost', () => {
     });
     await handle.completion;
 
-    expect(child.llmCalls[0]?.history[0]).toMatchObject({
+    expect(child.llmCalls[0]?.history[1]).toMatchObject({
       role: 'user',
       content: [{ type: 'text', text: 'Implement the fix' }],
     });
@@ -1927,7 +1927,8 @@ function userTextMessages(history: readonly Message[]): string[] {
         .filter((part) => part.type === 'text')
         .map((part) => part.text)
         .join(''),
-    );
+    )
+    .filter((text) => !text.startsWith('<system-reminder>'));
 }
 
 async function writeWire(homedir: string, records: readonly Record<string, unknown>[]) {

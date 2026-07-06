@@ -1,0 +1,85 @@
+; Sample NIF file for testing nif-extractor
+; This simulates output from Nim's IC pipeline
+
+(proc
+  (name (exportedSym "z3.solveConstraint"))
+  (params
+    (param "constraints" (typeRef "seq" (typeRef "z3.Constraint")))
+    (param "timeout" (typeRef "int") (default (intVal 1000)))
+  )
+  (ret (typeRef "bool"))
+  (pragma (efx "gcsafe") (efx "noSideEffect"))
+  (import "z3/Solver")
+  (import "z3/Model")
+  (call (sym "z3.Solver.init"))
+  (call (sym "z3.Model.validate"))
+  (line 42)
+  (docComment "Solve a set of Z3 constraints within the given timeout.")
+)
+
+(func
+  (name (exportedSym "z3.addConstraint"))
+  (params
+    (param "solver" (typeRef "z3.Solver"))
+    (param "constraint" (typeRef "z3.Constraint"))
+  )
+  (ret (typeRef "void"))
+  (pragma (efx "gcsafe") (efx "tags" "WriteIOEffect"))
+  (import "z3/Solver")
+  (call (sym "z3.Solver.add"))
+  (line 58)
+)
+
+(template
+  (name (exportedSym "z3.withSolver"))
+  (params
+    (param "body" (typeRef "untyped"))
+  )
+  (ret (typeRef "untyped"))
+  (pragma (efx "gcsafe"))
+  (line 71)
+)
+
+(macro
+  (name (exportedSym "z3.defineSort"))
+  (params
+    (param "name" (typeRef "string"))
+    (param "fields" (typeRef "untyped"))
+  )
+  (ret (typeRef "untyped"))
+  (expandedFrom "z3.macro" "sample.nim:15" (sExpr "typeDef" "MySort"))
+  (line 84)
+)
+
+(type
+  (name (exportedSym "z3.Constraint"))
+  (object
+    (field "expr" (typeRef "z3.Expr"))
+    (field "weight" (typeRef "float") (default (floatVal 1.0)))
+  )
+  (pragma (efx "gcsafe"))
+  (line 95)
+)
+
+(type
+  (name (exportedSym "z3.Solver"))
+  (object
+    (field "ctx" (typeRef "z3.Context"))
+    (field "assertions" (typeRef "seq" (typeRef "z3.Constraint")))
+  )
+  (pragma (efx "gcsafe"))
+  (import "z3/Context")
+  (line 108)
+)
+
+(const
+  (name (exportedSym "z3.maxTimeout"))
+  (type (typeRef "int"))
+  (intVal 30000)
+  (line 120)
+)
+
+(include "z3/internal_utils.nim")
+(include "z3/types_common.nim")
+
+(fromModImport "z3" "Constraint" "Solver" "Model")
