@@ -1,17 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 
-import type { LLM, LLMChatResponse } from '#/loop/llm';
+import type { LLMChatResponse } from '#/loop/llm';
 import { CircuitBreakerOpenerLLM } from '#/loop/circuit-breaker-opener-llm';
-
-function createMockLLM(overrides?: Partial<LLM>): LLM {
-  return {
-    systemPrompt: 'test',
-    modelName: 'test-model',
-    isRetryableError: () => true,
-    chat: vi.fn().mockResolvedValue({ toolCalls: [], usage: { promptTokens: 0, completionTokens: 0 } }),
-    ...overrides,
-  };
-}
+import { capabilityFactory, llmFactory } from '../factories';
 
 function rateLimitedError(): Error {
   return Object.assign(new Error('Rate limited'), { statusCode: 429 });
@@ -42,7 +33,7 @@ describe('CircuitBreakerOpenerLLM', () => {
   it('force-opens circuit breaker for correct provider on 429', async () => {
     const forceOpen = vi.fn();
     const resolveProvider = vi.fn().mockReturnValue({ providerName: 'openai' });
-    const inner = createMockLLM({
+    const inner = llmFactory.build({
       chat: vi.fn().mockRejectedValue(rateLimitedError()),
     });
     const llm = new CircuitBreakerOpenerLLM(inner, makeDeps({ forceOpen, resolveProvider }));
@@ -50,12 +41,12 @@ describe('CircuitBreakerOpenerLLM', () => {
     await expect(llm.chat(dummyParams)).rejects.toThrow('Rate limited');
 
     expect(forceOpen).toHaveBeenCalledWith('openai');
-    expect(resolveProvider).toHaveBeenCalledWith('test-model');
+    expect(resolveProvider).toHaveBeenCalledWith(inner.modelName);
   });
 
   it('re-throws the 429 error after opening the circuit', async () => {
     const error = rateLimitedError();
-    const inner = createMockLLM({
+    const inner = llmFactory.build({
       chat: vi.fn().mockRejectedValue(error),
     });
     const llm = new CircuitBreakerOpenerLLM(inner, makeDeps());
@@ -64,21 +55,21 @@ describe('CircuitBreakerOpenerLLM', () => {
   });
 
   it('returns false from isRetryableError for 429', () => {
-    const inner = createMockLLM();
+    const inner = llmFactory.build();
     const llm = new CircuitBreakerOpenerLLM(inner, makeDeps());
 
     expect(llm.isRetryableError(rateLimitedError())).toBe(false);
   });
 
   it('delegates isRetryableError to inner LLM for non-429 errors', () => {
-    const inner = createMockLLM({ isRetryableError: () => true });
+    const inner = llmFactory.build({ isRetryableError: () => true });
     const llm = new CircuitBreakerOpenerLLM(inner, makeDeps());
 
     expect(llm.isRetryableError(internalServerError())).toBe(true);
   });
 
   it('returns false from isRetryableError for non-429 when inner returns false', () => {
-    const inner = createMockLLM({ isRetryableError: () => false });
+    const inner = llmFactory.build({ isRetryableError: () => false });
     const llm = new CircuitBreakerOpenerLLM(inner, makeDeps());
 
     expect(llm.isRetryableError(internalServerError())).toBe(false);
@@ -87,7 +78,7 @@ describe('CircuitBreakerOpenerLLM', () => {
   it('does NOT open circuit on non-429 error and re-throws', async () => {
     const forceOpen = vi.fn();
     const error = internalServerError();
-    const inner = createMockLLM({
+    const inner = llmFactory.build({
       chat: vi.fn().mockRejectedValue(error),
     });
     const llm = new CircuitBreakerOpenerLLM(inner, makeDeps({ forceOpen }));
@@ -102,7 +93,7 @@ describe('CircuitBreakerOpenerLLM', () => {
       toolCalls: [],
       usage: { promptTokens: 10, completionTokens: 20 },
     };
-    const inner = createMockLLM({
+    const inner = llmFactory.build({
       chat: vi.fn().mockResolvedValue(response),
     });
     const llm = new CircuitBreakerOpenerLLM(inner, makeDeps({ forceOpen }));
@@ -115,7 +106,7 @@ describe('CircuitBreakerOpenerLLM', () => {
 
   it('logs the circuit breaker open event when log is provided', async () => {
     const debug = vi.fn();
-    const inner = createMockLLM({
+    const inner = llmFactory.build({
       chat: vi.fn().mockRejectedValue(rateLimitedError()),
     });
     const llm = new CircuitBreakerOpenerLLM(inner, makeDeps({
@@ -126,13 +117,13 @@ describe('CircuitBreakerOpenerLLM', () => {
     await expect(llm.chat(dummyParams)).rejects.toThrow();
 
     expect(debug).toHaveBeenCalledWith(
-      'circuit breaker opened for anthropic (test-model)',
+      `circuit breaker opened for anthropic (${inner.modelName})`,
     );
   });
 
   it('does not log when resolveProvider returns undefined', async () => {
     const debug = vi.fn();
-    const inner = createMockLLM({
+    const inner = llmFactory.build({
       chat: vi.fn().mockRejectedValue(rateLimitedError()),
     });
     const llm = new CircuitBreakerOpenerLLM(inner, makeDeps({
@@ -146,15 +137,15 @@ describe('CircuitBreakerOpenerLLM', () => {
   });
 
   it('proxies systemPrompt, modelName, and capability from inner LLM', () => {
-    const inner = createMockLLM({
+    const inner = llmFactory.build({
       systemPrompt: 'my prompt',
       modelName: 'my-model',
-      capability: { maxTokens: 8192 },
+      capability: capabilityFactory.params({ max_output_tokens: 8192 }).build(),
     });
     const llm = new CircuitBreakerOpenerLLM(inner, makeDeps());
 
     expect(llm.systemPrompt).toBe('my prompt');
     expect(llm.modelName).toBe('my-model');
-    expect(llm.capability).toEqual({ maxTokens: 8192 });
+    expect(llm.capability).toEqual(capabilityFactory.params({ max_output_tokens: 8192 }).build());
   });
 });

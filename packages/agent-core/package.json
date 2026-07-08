@@ -100,6 +100,7 @@
     "@types/yauzl": "^2.10.3",
     "@types/yazl": "^2.4.6",
     "fast-check": "^4.8.0",
+    "fishery": "^2.4.0",
     "sinon": "^22.0.0",
     "yazl": "^3.3.1"
   }

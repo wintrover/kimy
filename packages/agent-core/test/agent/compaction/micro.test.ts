@@ -9,6 +9,7 @@ import {
 import { FLAG_DEFINITIONS, FlagResolver, MASTER_ENV } from '../../../src/flags';
 import { estimateTokensForMessages } from '../../../src/utils/tokens';
 import { recordingTelemetry, type TelemetryRecord } from '../../fixtures/telemetry';
+import { capabilityFactory } from '../../factories';
 import { testAgent, type TestAgentContext } from '../harness/agent';
 
 const CATALOGUED_PROVIDER = {
@@ -16,14 +17,7 @@ const CATALOGUED_PROVIDER = {
   apiKey: 'test-key',
   model: 'kimi-code',
 } as const;
-const CATALOGUED_MODEL_CAPABILITIES = {
-  image_in: true,
-  video_in: true,
-  audio_in: false,
-  thinking: true,
-  tool_use: true,
-  max_context_tokens: 256_000,
-} as const;
+const CATALOGUED_MODEL_CAPABILITIES = capabilityFactory.vision().thinking().build({ max_context_tokens: 256_000 });
 
 const MINUTE = 60 * 1000;
 const DEFAULT_MARKER = '[Old tool result content cleared]';
@@ -740,14 +734,7 @@ describe('MicroCompaction', () => {
     });
     ctx.configure({
       provider: CATALOGUED_PROVIDER,
-      modelCapabilities: {
-        image_in: true,
-        video_in: true,
-        audio_in: false,
-        thinking: true,
-        tool_use: true,
-        max_context_tokens: 100,
-      },
+      modelCapabilities: capabilityFactory.vision().thinking().build({ max_context_tokens: 100 }),
     });
 
     vi.setSystemTime(0);

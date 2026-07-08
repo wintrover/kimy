@@ -1,4 +1,4 @@
-import type { ChatProvider, ModelCapability } from '@moonshot-ai/kosong';
+import type { ChatProvider } from '@moonshot-ai/kosong';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -6,18 +6,7 @@ import {
   computeCompletionBudgetCap,
   resolveCompletionBudget,
 } from '../../src/utils/completion-budget';
-
-function makeCapability(maxContextTokens: number, maxOutputTokens: number = 0): ModelCapability {
-  return {
-    image_in: false,
-    video_in: false,
-    audio_in: false,
-    thinking: false,
-    tool_use: true,
-    max_context_tokens: maxContextTokens,
-    max_output_tokens: maxOutputTokens,
-  };
-}
+import { capabilityFactory } from '../factories';
 
 describe('computeCompletionBudgetCap', () => {
   it('uses fallback when context size is unknown and no hard cap is set', () => {
@@ -31,7 +20,7 @@ describe('computeCompletionBudgetCap', () => {
   it('uses an explicit hard cap when context size is unknown', () => {
     const cap = computeCompletionBudgetCap({
       budget: { hardCap: 10, fallback: 8192 },
-      capability: makeCapability(0),
+      capability: capabilityFactory.maxOutput(0).params({ max_context_tokens: 0 }).build(),
     });
     expect(cap).toBe(10);
   });
@@ -55,7 +44,7 @@ describe('computeCompletionBudgetCap', () => {
     const maxCtx = 100000;
     const cap = computeCompletionBudgetCap({
       budget: { fallback: 32000 },
-      capability: makeCapability(maxCtx),
+      capability: capabilityFactory.params({ max_output_tokens: 0, max_context_tokens: maxCtx }).build(),
     });
     // maxCtx is a ceiling only; since max_output_tokens is 0, the fallback is used.
     expect(cap).toBe(32000);
@@ -64,7 +53,7 @@ describe('computeCompletionBudgetCap', () => {
   it('uses the explicit hard cap when configured (clamped by context window)', () => {
     const cap = computeCompletionBudgetCap({
       budget: { hardCap: 32000 },
-      capability: makeCapability(48000),
+      capability: capabilityFactory.params({ max_context_tokens: 48000 }).build(),
     });
     // hardCap (32000) is smaller than maxCtx (48000), so hardCap is the result.
     expect(cap).toBe(32000);
@@ -73,7 +62,7 @@ describe('computeCompletionBudgetCap', () => {
   it('ignores fallback when the model context window is known', () => {
     const cap = computeCompletionBudgetCap({
       budget: { fallback: 32000 },
-      capability: makeCapability(10000),
+      capability: capabilityFactory.params({ max_output_tokens: 0, max_context_tokens: 10000 }).build(),
     });
     expect(cap).toBe(10000);
   });
@@ -81,7 +70,7 @@ describe('computeCompletionBudgetCap', () => {
   it('keeps explicit hard cap when smaller than remaining', () => {
     const cap = computeCompletionBudgetCap({
       budget: { hardCap: 1024 },
-      capability: makeCapability(100000),
+      capability: capabilityFactory.params({ max_context_tokens: 100000 }).build(),
     });
     expect(cap).toBe(1024);
   });
@@ -113,7 +102,7 @@ describe('applyCompletionBudget', () => {
     const result = applyCompletionBudget({
       provider: original,
       budget: undefined,
-      capability: makeCapability(10000),
+      capability: capabilityFactory.params({ max_context_tokens: 10000 }).build(),
     });
     expect(result).toBe(original);
     expect(withMaxCompletionTokens).not.toHaveBeenCalled();
@@ -126,7 +115,7 @@ describe('applyCompletionBudget', () => {
     const result = applyCompletionBudget({
       provider: opaque,
       budget: { hardCap: 8192 },
-      capability: makeCapability(10000),
+      capability: capabilityFactory.params({ max_context_tokens: 10000 }).build(),
     });
     expect(result).toBe(opaque);
   });
@@ -135,7 +124,7 @@ describe('applyCompletionBudget', () => {
     const result = applyCompletionBudget({
       provider: original,
       budget: { fallback: 32000 },
-      capability: makeCapability(10000),
+      capability: capabilityFactory.params({ max_output_tokens: 0, max_context_tokens: 10000 }).build(),
     });
     expect(withMaxCompletionTokens).toHaveBeenCalledOnce();
     const cap = withMaxCompletionTokens.mock.calls[0]?.[0] as number;
@@ -147,7 +136,7 @@ describe('applyCompletionBudget', () => {
     const result = applyCompletionBudget({
       provider: original,
       budget: { hardCap: 8192 },
-      capability: makeCapability(10000),
+      capability: capabilityFactory.params({ max_context_tokens: 10000 }).build(),
     });
     expect(withMaxCompletionTokens).toHaveBeenCalledOnce();
     expect(withMaxCompletionTokens.mock.calls[0]?.[0]).toBe(8192);

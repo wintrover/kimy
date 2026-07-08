@@ -14,6 +14,8 @@
 import type { ContentPart, ModelCapability, TokenUsage } from '@moonshot-ai/kosong';
 import { describe, expect, it } from 'vitest';
 
+import { capabilityFactory } from '../factories';
+
 import { createLoopEventDispatcher, runTurn, ToolAccesses } from '../../src/loop/index';
 import type {
   AfterStepHook,
@@ -389,15 +391,7 @@ function _typeOnlyChecks(): void {
   void _badStop3;
 
   // Capability metadata reuses Kosong's provider-facing shape.
-  const capability: ModelCapability = {
-    image_in: false,
-    video_in: false,
-    audio_in: false,
-    thinking: false,
-    tool_use: true,
-    max_context_tokens: 200000,
-    max_output_tokens: 0,
-  };
+  const capability = capabilityFactory.params({ max_context_tokens: 200000, max_output_tokens: 0 }).build();
   const _llmCapability: ModelCapability | undefined = _llm.capability;
   void capability;
   void _llmCapability;

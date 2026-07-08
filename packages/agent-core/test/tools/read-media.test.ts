@@ -15,6 +15,7 @@ import {
 import { MEDIA_SNIFF_BYTES } from '../../src/tools/support/file-type';
 import { createFakeKaos, PERMISSIVE_WORKSPACE } from './fixtures/fake-kaos';
 import { executeTool } from './fixtures/execute-tool';
+import { capabilityFactory } from '../factories';
 
 const signal = new AbortController().signal;
 
@@ -41,15 +42,7 @@ const MP4_HEADER = Buffer.concat([
 ]);
 
 function capabilities(overrides: Partial<ModelCapability> = {}): ModelCapability {
-  return {
-    image_in: true,
-    video_in: true,
-    audio_in: false,
-    thinking: false,
-    tool_use: true,
-    max_context_tokens: 0,
-    ...overrides,
-  };
+  return capabilityFactory.vision().build(overrides) as ModelCapability;
 }
 
 function makeReadMediaTool(

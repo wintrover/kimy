@@ -1,7 +1,6 @@
 import {
   emptyUsage,
   type ChatProvider,
-  type ModelCapability,
   type StreamedMessagePart,
   type ToolCall,
 } from '@moonshot-ai/kosong';
@@ -9,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 import { KosongLLM, type GenerateFn } from '../../src/agent/turn/kosong-llm';
 import type { ToolCallDelta } from '../../src/loop';
+import { capabilityFactory } from '../factories';
 
 const provider: ChatProvider = {
   name: 'test',
@@ -217,13 +217,6 @@ function stripStreamIndex(toolCall: ToolCall): ToolCall {
   return rest;
 }
 
-function makeCapability(maxContextTokens: number): ModelCapability {
-  return {
-    image_in: false,
-    video_in: false,
-    audio_in: false,
-    thinking: false,
-    tool_use: true,
-    max_context_tokens: maxContextTokens,
-  };
+function makeCapability(maxContextTokens: number) {
+  return capabilityFactory.maxOutput(maxContextTokens).build({ max_context_tokens: maxContextTokens });
 }

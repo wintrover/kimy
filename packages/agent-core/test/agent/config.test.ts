@@ -1,5 +1,7 @@
-import type { ModelCapability, ProviderConfig, ToolCall } from '@moonshot-ai/kosong';
+import type { ProviderConfig, ToolCall } from '@moonshot-ai/kosong';
 import { describe, expect, it } from 'vitest';
+
+import { capabilityFactory } from '../factories';
 
 import type { ResolvedAgentProfile } from '../../src/profile';
 import { createCommandKaos, testAgent } from './harness/agent';
@@ -14,15 +16,7 @@ describe('Agent config', () => {
       baseUrl: 'https://initial.example/v1',
       model: 'gpt-initial',
     };
-    const initialCapability: ModelCapability = {
-      image_in: true,
-      video_in: false,
-      audio_in: false,
-      thinking: false,
-      tool_use: true,
-      max_context_tokens: 128000,
-      max_output_tokens: 0,
-    };
+    const initialCapability = capabilityFactory.params({ image_in: true, max_output_tokens: 0 }).build();
     ctx.configure({
       provider: initialProvider,
       modelCapabilities: initialCapability,
@@ -41,15 +35,7 @@ describe('Agent config', () => {
       baseUrl: 'https://next.example/v1',
       model: 'kimi-next',
     };
-    const nextCapability: ModelCapability = {
-      image_in: true,
-      video_in: true,
-      audio_in: false,
-      thinking: true,
-      tool_use: true,
-      max_context_tokens: 262144,
-      max_output_tokens: 0,
-    };
+    const nextCapability = capabilityFactory.vision().thinking().params({ max_context_tokens: 262144 }).maxOutput(0).build();
     ctx.configureRuntimeModel(nextProvider, nextCapability);
     ctx.agent.config.update({
       systemPrompt: 'Changed profile prompt.',

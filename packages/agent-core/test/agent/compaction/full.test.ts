@@ -22,6 +22,7 @@ import { FLAG_DEFINITIONS, MASTER_ENV } from '../../../src/flags';
 import { HookEngine, type HookEngineTriggerArgs } from '../../../src/session/hooks';
 import { estimateTokensForMessages } from '../../../src/utils/tokens';
 import { recordingTelemetry, type TelemetryRecord } from '../../fixtures/telemetry';
+import { capabilityFactory } from '../../factories';
 import type { TestAgentContext, TestAgentOptions } from '../harness/agent';
 import { testAgent } from '../harness/agent';
 
@@ -32,14 +33,7 @@ const CATALOGUED_PROVIDER = {
   apiKey: 'test-key',
   model: 'kimi-code',
 } as const;
-const CATALOGUED_MODEL_CAPABILITIES = {
-  image_in: true,
-  video_in: true,
-  audio_in: false,
-  thinking: true,
-  tool_use: true,
-  max_context_tokens: 256_000,
-} as const;
+const CATALOGUED_MODEL_CAPABILITIES = capabilityFactory.vision().thinking().build({ max_context_tokens: 256_000 });
 const MICRO_COMPACTION_FLAG_ENV = getMicroCompactionFlagEnv();
 
 describe('FullCompaction', () => {

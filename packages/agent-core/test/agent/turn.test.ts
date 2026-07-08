@@ -10,7 +10,6 @@ import {
   APIStatusError,
   APITimeoutError,
   type ChatProvider,
-  type ModelCapability,
   type ToolCall,
 } from '@moonshot-ai/kosong';
 import { describe, expect, it, vi } from 'vitest';
@@ -29,6 +28,7 @@ import { recordingTelemetry, type TelemetryRecord } from '../fixtures/telemetry'
 import { createFakeKaos } from '../tools/fixtures/fake-kaos';
 import { createCommandKaos, testAgent, type TestAgentOptions } from './harness/agent';
 import { executeTool } from '../tools/fixtures/execute-tool';
+import { capabilityFactory } from '../factories';
 
 type GenerateFn = NonNullable<AgentOptions['generate']>;
 
@@ -1847,15 +1847,8 @@ async function waitForFile(path: string): Promise<void> {
   throw new Error(`Timed out waiting for ${path}`);
 }
 
-function mediaCapabilities(): ModelCapability {
-  return {
-    image_in: true,
-    video_in: true,
-    audio_in: false,
-    thinking: false,
-    tool_use: true,
-    max_context_tokens: 1_000_000,
-  };
+function mediaCapabilities() {
+  return capabilityFactory.vision().build({ max_context_tokens: 1_000_000 });
 }
 
 function oauthAgentOptions(

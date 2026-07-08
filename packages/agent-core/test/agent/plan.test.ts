@@ -2,6 +2,7 @@ import type { ToolCall } from '@moonshot-ai/kosong';
 import { describe, expect, it, vi } from 'vitest';
 
 import { PlanMode, PlanTransition, PlanTransitionState } from '../../src/agent/plan';
+import { loggerFactory } from '../factories';
 import { createFakeKaos } from '../tools/fixtures/fake-kaos';
 import { createCommandKaos, testAgent } from './harness/agent';
 
@@ -686,7 +687,7 @@ describe('plan GC', () => {
       }
       return { stMtime: Date.now() / 1000, stMode: 0o040755 } as any;
     });
-    const log = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const log = loggerFactory.recording().build();
     const ctx = testAgent({
       kaos: createFakeKaos({
         mkdir: vi.fn().mockResolvedValue(undefined),
