@@ -312,12 +312,24 @@ export class SessionSubagentHost {
   }
 
   async runQueued<T>(tasks: readonly QueuedSubagentTask<T>[]): Promise<Array<SubagentResult<T>>> {
+    // Take epoch snapshot before batch — "memory checkpoint"
+    const snapshot = this.session.takeEpochSnapshot();
+
     const maxConcurrency = resolveSwarmMaxConcurrency();
     const config = this.session.options.config;
-    return new SubagentBatch(this, tasks, {
-      maxConcurrency,
-      fallbackModel: config?.subagentFallbackModel,
-    }).run();
+
+    try {
+      const results = await new SubagentBatch(this, tasks, { maxConcurrency, fallbackModel: config?.subagentFallbackModel }).run();
+
+      // Commit epoch after successful batch — "atomic pointer swap simulation"
+      await this.session.commitEpoch();
+
+      return results;
+    } catch (error) {
+      // Rollback on failure — "checkpoint restore"
+      this.session.rollbackEpoch();
+      throw error;
+    }
   }
 
   suspended(event: SubagentSuspendedEvent): void {

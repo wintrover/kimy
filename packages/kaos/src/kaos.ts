@@ -1,6 +1,6 @@
 import type { Environment } from './environment';
 import type { KaosProcess } from './process';
-import type { StatResult } from './types';
+import type { ContentVector, SnapshotOptions, StatResult } from './types';
 
 /**
  * Kimi Agent Operating System (KAOS) interface.
@@ -54,6 +54,22 @@ export interface Kaos {
     pattern: string,
     options?: { caseSensitive?: boolean },
   ): AsyncGenerator<string>;
+
+  // ── Snapshot (atomic I/O boundary) ──────────────────────────────────
+
+  /**
+   * Capture a complete filesystem snapshot under `root` in a single I/O pass.
+   *
+   * Stage 1 of the deterministic pipeline:
+   * - Uses `readdir({ withFileTypes: true })` to avoid per-entry stat for directories
+   * - Reads file content and computes SHA-256 hashes
+   * - Returns an immutable `ContentVector` — no further disk I/O after this call
+   *
+   * @param root - The directory to snapshot (absolute or relative to cwd)
+   * @param options - Filtering and size options
+   * @returns Frozen array of FsEntry objects
+   */
+  snapshot(root: string, options?: SnapshotOptions): Promise<ContentVector>;
 
   // ── File operations (async) ─────────────────────────────────────────
 

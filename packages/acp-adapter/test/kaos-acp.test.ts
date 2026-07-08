@@ -80,6 +80,7 @@ interface MockInnerKaos extends Kaos {
     readTextCalls: string[];
     writeTextCalls: Array<{ path: string; data: string }>;
     readBytesCalls: Array<{ path: string; n?: number }>;
+    snapshotCalls: Array<{ root: string; options?: { followSymlinks?: boolean } }>;
   };
 }
 
@@ -102,6 +103,7 @@ function makeMockInner(opts?: { pathClass?: 'posix' | 'win32' }): MockInnerKaos 
     readTextCalls: [] as string[],
     writeTextCalls: [] as Array<{ path: string; data: string }>,
     readBytesCalls: [] as Array<{ path: string; n?: number }>,
+    snapshotCalls: [] as Array<{ root: string; options?: { followSymlinks?: boolean } }>,
   };
 
   const inner: MockInnerKaos = {
@@ -194,6 +196,10 @@ function makeMockInner(opts?: { pathClass?: 'posix' | 'win32' }): MockInnerKaos 
     writeText: async (path: string, data: string) => {
       spy.writeTextCalls.push({ path, data });
       return data.length;
+    },
+    snapshot: async (root: string, options?: { followSymlinks?: boolean }) => {
+      spy.snapshotCalls.push({ root, options });
+      return [] as import('@moonshot-ai/kaos').ContentVector;
     },
   };
   return inner;

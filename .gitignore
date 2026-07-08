@@ -11,6 +11,7 @@ coverage/
 .claude
 .conductor
 .kimi-stash-dir
+.axiom/
 plugins/cdn/
 .worktrees/
 .kimi-code/local.toml

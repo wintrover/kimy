@@ -51,7 +51,8 @@ export function createFakeKaos(
     },
     stat: () => notImplemented('stat'),
     iterdir: () => notImplemented('iterdir'),
-    glob: () => notImplemented('glob'),
+    // eslint-disable-next-line require-yield
+    async *glob() { /* empty — FileIndexBuilder.build calls this but tests don't need results */ },
     readBytes: () => notImplemented('readBytes'),
     readText: () => notImplemented('readText'),
     readLines: () => notImplemented('readLines'),

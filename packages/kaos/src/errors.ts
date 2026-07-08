@@ -39,3 +39,13 @@ export class KaosShellNotFoundError extends KaosError {
     this.name = 'KaosShellNotFoundError';
   }
 }
+
+/**
+ * Thrown when an operation is blocked by sandbox/hermetic constraints.
+ */
+export class KaosSandboxError extends KaosError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'KaosSandboxError';
+  }
+}

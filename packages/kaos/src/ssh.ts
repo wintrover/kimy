@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, join, normalize, resolve } from 'pathe';
 import type { Readable, Writable } from 'node:stream';
@@ -17,7 +18,8 @@ import { KaosError, KaosFileExistsError, KaosValueError } from './errors';
 import { BufferedReadable, decodeTextWithErrors, globPatternToRegex } from './internal';
 import type { Kaos } from './kaos';
 import type { KaosProcess } from './process';
-import type { StatResult } from './types';
+import type { ContentVector, FsEntry, SnapshotOptions, StatResult } from './types';
+import { gitignorePatternToRegex, parseGitignoreContent } from './file-index-builder';
 
 // ── stat mode constants ────────────────────────────────────────────────
 const S_IFMT = 0o170000;
@@ -845,6 +847,132 @@ export class SSHKaos implements Kaos {
         }
       }
     }
+  }
+
+  async snapshot(root: string, options?: SnapshotOptions): Promise<ContentVector> {
+    const resolved = this._resolvePath(root);
+    const excludeDirs = options?.excludeDirs ?? new Set<string>();
+    const respectGitignore = options?.respectGitignore ?? true;
+    const excludePatterns = options?.excludePatterns;
+    const maxFileSize = options?.maxFileSize ?? 10 * 1024 * 1024;
+
+    // ── Parse .gitignore ────────────────────────────────────────────
+    let gitignoreRules: Array<{ regex: RegExp; negated: boolean; directoryOnly: boolean }> = [];
+    if (respectGitignore) {
+      try {
+        const content = await sftpReadFile(this._sftp, resolved + '/.gitignore');
+        gitignoreRules = parseGitignoreContent(content.toString('utf-8'));
+      } catch {
+        // No .gitignore — continue with empty rules.
+      }
+    }
+
+    // ── Compile exclude patterns ────────────────────────────────────
+    const excludeRegexes = excludePatterns?.map((p) => gitignorePatternToRegex(p));
+
+    const result: FsEntry[] = [];
+
+    // ── Recursive walk ──────────────────────────────────────────────
+    const walk = async (dirPath: string, relPrefix: string): Promise<void> => {
+      let entries: SFTPFileEntry[];
+      try {
+        entries = await sftpReaddir(this._sftp, dirPath);
+      } catch {
+        return;
+      }
+
+      for (const entry of entries) {
+        if (entry.filename === '.' || entry.filename === '..') continue;
+
+        const relPath = relPrefix ? `${relPrefix}/${entry.filename}` : entry.filename;
+        const fullPath = join(dirPath, entry.filename);
+
+        // ── excludeDirs ─────────────────────────────────────────────
+        if (excludeDirs.has(entry.filename)) continue;
+
+        // ── Exclude patterns ────────────────────────────────────────
+        if (excludeRegexes) {
+          let matched = false;
+          for (const regex of excludeRegexes) {
+            if (regex.test(relPath)) {
+              matched = true;
+              break;
+            }
+          }
+          if (matched) continue;
+        }
+
+        const isDir = entry.attrs.isDirectory();
+        const isFile = entry.attrs.isFile();
+        const isSymlink = entry.attrs.isSymbolicLink();
+
+        // ── Gitignore ───────────────────────────────────────────────
+        if (gitignoreRules.length > 0) {
+          let ignored = false;
+          for (const rule of gitignoreRules) {
+            if (rule.directoryOnly && !isDir) continue;
+            if (rule.regex.test(relPath)) {
+              ignored = !rule.negated;
+            }
+          }
+          if (ignored) continue;
+        }
+
+        if (isDir) {
+          result.push({
+            relPath,
+            isDirectory: true,
+            isFile: false,
+            isSymbolicLink: false,
+            size: 0,
+            mtime: 0,
+            contentHash: '',
+            content: null,
+          });
+          await walk(fullPath, relPath);
+        } else if (isFile) {
+          // ── Size limit ────────────────────────────────────────────
+          const size = entry.attrs.size;
+          if (size > maxFileSize) continue;
+
+          // ── Read content and compute hash ─────────────────────────
+          let content: Buffer;
+          try {
+            content = await sftpReadFile(this._sftp, fullPath);
+          } catch {
+            continue;
+          }
+
+          const contentHash = createHash('sha256').update(content).digest('hex');
+          const mtime = entry.attrs.mtime;
+
+          result.push({
+            relPath,
+            isDirectory: false,
+            isFile: true,
+            isSymbolicLink: false,
+            size,
+            mtime,
+            contentHash,
+            content,
+          });
+        } else if (isSymlink) {
+          result.push({
+            relPath,
+            isDirectory: false,
+            isFile: false,
+            isSymbolicLink: true,
+            size: 0,
+            mtime: entry.attrs.mtime,
+            contentHash: '',
+            content: null,
+          });
+        }
+      }
+    };
+
+    await walk(resolved, '');
+    return Object.freeze(result);
   }
 
   // ── Process execution ──────────────────────────────────────────────

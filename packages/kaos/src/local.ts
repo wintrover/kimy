@@ -1,5 +1,6 @@
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   appendFile,
   lstat,
@@ -11,18 +12,24 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { isAbsolute, join, normalize } from 'pathe';
+import { isAbsolute, join, normalize, relative } from 'pathe';
 import type { Readable, Writable } from 'node:stream';
 
 import { detectEnvironmentFromNode, type Environment } from './environment';
 import { KaosFileExistsError } from './errors';
+import { gitignorePatternToRegex, parseGitignoreContent } from './file-index-builder';
 import { BufferedReadable, decodeTextWithErrors, globPatternToRegex } from './internal';
 import type { Kaos } from './kaos';
 import type { KaosProcess } from './process';
-import type { StatResult } from './types';
+import type { ContentVector, FsEntry, SnapshotOptions, StatResult } from './types';
 
 const isWindows: boolean = process.platform === 'win32';
 const READ_CHUNK_SIZE = 64 * 1024;
+
+const DEFAULT_EXCLUDE_DIRS = new Set([
+  'node_modules', '.git', '.next', '.axiom', 'dist', 'build',
+  '.cache', '__pycache__', '.turbo', '.pnpm', 'coverage', '.nyc_output',
+]);
 
 type TextDecodeErrors = 'strict' | 'replace' | 'ignore';
 
@@ -51,6 +58,22 @@ interface TextFileScan {
 function cycleKey(s: { dev: number; ino: number }): string | null {
   if (s.ino === 0) return null;
   return `${String(s.dev)}:${String(s.ino)}`;
+}
+
+interface GitignoreRule {
+  regex: RegExp;
+  negated: boolean;
+  directoryOnly: boolean;
+}
+
+async function parseGitignore(root: string): Promise<GitignoreRule[]> {
+  let content: string;
+  try {
+    content = await readFile(join(root, '.gitignore'), { encoding: 'utf-8' });
+  } catch {
+    return [];
+  }
+  return parseGitignoreContent(content);
 }
 
 export function buildLocalSpawnOptions(
@@ -379,6 +402,11 @@ export class LocalKaos implements Kaos {
       }
 
       for (const entry of entries) {
+        // Early pruning: skip well-known excluded directories before stat().
+        if (DEFAULT_EXCLUDE_DIRS.has(entry)) {
+          continue;
+        }
+
         // Use join to avoid "//entry" when basePath is a filesystem root.
         const fullPath = join(basePath, entry);
         let entryStat;
@@ -716,6 +744,153 @@ export class LocalKaos implements Kaos {
         return;
       }
       throw error;
+    }
+  }
+
+  async snapshot(root: string, options?: SnapshotOptions): Promise<ContentVector> {
+    const resolvedRoot = this._resolvePath(root);
+    const excludeDirs = options?.excludeDirs ?? DEFAULT_EXCLUDE_DIRS;
+    const followSymlinks = options?.followSymlinks ?? false;
+    const respectGitignore = options?.respectGitignore ?? true;
+    const maxFileSize = options?.maxFileSize ?? 10 * 1024 * 1024;
+
+    // ── Compile exclude patterns ────────────────────────────────────
+    const excludeRegexes = (options?.excludePatterns ?? []).map((p) =>
+      gitignorePatternToRegex(p),
+    );
+
+    // ── Parse .gitignore ────────────────────────────────────────────
+    const gitignoreRules = respectGitignore
+      ? await parseGitignore(resolvedRoot)
+      : [];
+
+    const result: FsEntry[] = [];
+
+    await this._snapshotWalk(resolvedRoot, resolvedRoot, result, {
+      excludeDirs,
+      followSymlinks,
+      maxFileSize,
+      excludeRegexes,
+      gitignoreRules,
+    });
+
+    return Object.freeze(result);
+  }
+
+  private async _snapshotWalk(
+    dirPath: string,
+    rootPath: string,
+    result: FsEntry[],
+    ctx: {
+      excludeDirs: Set<string>;
+      followSymlinks: boolean;
+      maxFileSize: number;
+      excludeRegexes: RegExp[];
+      gitignoreRules: GitignoreRule[];
+    },
+  ): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(dirPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      // ── Exclude dirs by name ──────────────────────────────────────
+      if (ctx.excludeDirs.has(entry.name)) {
+        continue;
+      }
+
+      const fullPath = join(dirPath, entry.name);
+      const relPath = relative(rootPath, fullPath).split('\\').join('/');
+
+      // ── Exclude patterns ──────────────────────────────────────────
+      let matchesExclude = false;
+      for (const regex of ctx.excludeRegexes) {
+        if (regex.test(relPath)) {
+          matchesExclude = true;
+          break;
+        }
+      }
+      if (matchesExclude) continue;
+
+      const isDirectory = entry.isDirectory();
+      const isSymbolicLink = entry.isSymbolicLink();
+
+      // ── Gitignore ─────────────────────────────────────────────────
+      if (ctx.gitignoreRules.length > 0) {
+        let ignored = false;
+        for (const rule of ctx.gitignoreRules) {
+          if (rule.directoryOnly && !isDirectory) continue;
+          if (rule.regex.test(relPath)) {
+            ignored = !rule.negated;
+          }
+        }
+        if (ignored) continue;
+      }
+
+      // ── Symlink handling ──────────────────────────────────────────
+      if (isSymbolicLink && !ctx.followSymlinks) {
+        result.push({
+          relPath,
+          isDirectory: false,
+          isFile: false,
+          isSymbolicLink: true,
+          size: 0,
+          mtime: 0,
+          contentHash: '',
+          content: null,
+        });
+        continue;
+      }
+
+      if (isDirectory) {
+        result.push({
+          relPath,
+          isDirectory: true,
+          isFile: false,
+          isSymbolicLink,
+          size: 0,
+          mtime: 0,
+          contentHash: '',
+          content: null,
+        });
+        await this._snapshotWalk(fullPath, rootPath, result, ctx);
+        continue;
+      }
+
+      // ── File entry ────────────────────────────────────────────────
+      let fileStat;
+      try {
+        fileStat = await this.stat(fullPath, { followSymlinks: ctx.followSymlinks });
+      } catch {
+        continue;
+      }
+
+      if (fileStat.stSize > ctx.maxFileSize) {
+        continue;
+      }
+
+      let content: Buffer;
+      try {
+        content = Buffer.from(await readFile(fullPath));
+      } catch {
+        continue;
+      }
+
+      const contentHash = createHash('sha256').update(content).digest('hex');
+
+      result.push({
+        relPath,
+        isDirectory: false,
+        isFile: true,
+        isSymbolicLink,
+        size: fileStat.stSize,
+        mtime: fileStat.stMtime,
+        contentHash,
+        content,
+      });
     }
   }
 

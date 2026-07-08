@@ -1,3 +1,4 @@
+import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import { defineConfig } from 'tsdown';
@@ -8,7 +9,7 @@ import { BUILT_IN_CATALOG_DEFINE, builtInCatalogDefine } from './scripts/built-i
 const appRoot = import.meta.dirname;
 
 export default defineConfig({
-  entry: ['./src/main.ts'],
+  entry: ['./src/entry.ts'],
   format: ['esm'],
   outDir: 'dist',
   clean: true,
@@ -35,6 +36,17 @@ export default defineConfig({
   },
   outputOptions: {
     codeSplitting: false,
-    entryFileNames: 'main.mjs',
+    entryFileNames: 'entry.mjs',
+  },
+  hooks: {
+    'build:done': async (context) => {
+      const outDir = context.options.outDir;
+      const wrapperPath = resolve(outDir, 'main.mjs');
+      const wrapperContent = [
+        '#!/usr/bin/env node',
+        "import './entry.mjs';",
+      ].join('\n');
+      await writeFile(wrapperPath, wrapperContent, 'utf-8');
+    },
   },
 });

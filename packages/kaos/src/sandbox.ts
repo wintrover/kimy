@@ -1,7 +1,7 @@
 import type { Environment } from './environment';
 import type { Kaos } from './kaos';
 import type { KaosProcess } from './process';
-import type { StatResult } from './types';
+import type { ContentVector, SnapshotOptions, StatResult } from './types';
 
 // ── Error classes ─────────────────────────────────────────────────
 
@@ -610,6 +610,10 @@ export class SandboxKaos implements Kaos {
 
   mkdir(path: string, options?: { parents?: boolean; existOk?: boolean }): Promise<void> {
     return this._inner.mkdir(path, options);
+  }
+
+  snapshot(root: string, options?: SnapshotOptions): Promise<ContentVector> {
+    return this._inner.snapshot(root, options);
   }
 
   // ── Process execution ────────────────────────────────────────────

@@ -1794,6 +1794,9 @@ function fakeSession(
       custom: {},
     },
     writeMetadata: vi.fn(async () => {}),
+    takeEpochSnapshot: vi.fn(() => undefined),
+    commitEpoch: vi.fn(async () => {}),
+    rollbackEpoch: vi.fn(),
     systemContextKaos: vi.fn((cwd: string) => parent.kaos.withCwd(cwd)),
     getReadyAgent: vi.fn((id: string) => agents.get(id)),
     ensureAgentResumed: vi.fn(async (id: string) => {

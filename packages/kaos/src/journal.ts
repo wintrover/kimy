@@ -1,7 +1,7 @@
 import type { Environment } from './environment';
 import type { Kaos } from './kaos';
 import type { KaosProcess } from './process';
-import type { StatResult } from './types';
+import type { ContentVector, SnapshotOptions, StatResult } from './types';
 
 // ── Public types ──────────────────────────────────────────────────
 
@@ -121,6 +121,10 @@ export class JournalKaos implements Kaos {
     if (!existed) {
       this._recordChange(path, 'created');
     }
+  }
+
+  snapshot(root: string, options?: SnapshotOptions): Promise<ContentVector> {
+    return this._inner.snapshot(root, options);
   }
 
   // ── Process execution ────────────────────────────────────────────

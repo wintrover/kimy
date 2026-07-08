@@ -22,9 +22,11 @@ import type { AgentSideConnection } from '@agentclientprotocol/sdk';
 import { RequestError } from '@agentclientprotocol/sdk';
 import {
   KaosError,
+  type ContentVector,
   type Environment,
   type Kaos,
   type KaosProcess,
+  type SnapshotOptions,
   type StatResult,
 } from '@moonshot-ai/kaos';
 
@@ -237,6 +239,12 @@ export class AcpKaos implements Kaos {
   private toClientPath(path: string): string {
     if (this.inner.pathClass() !== 'win32') return path;
     return path.replaceAll('/', '\\');
+  }
+
+  // ── snapshot: not yet implemented for ACP bridge ────────────────────
+
+  async snapshot(_root: string, _options?: SnapshotOptions): Promise<ContentVector> {
+    throw new Error('AcpKaos.snapshot() is not yet implemented');
   }
 
   // ── process execution: delegate to inner ───────────────────────────

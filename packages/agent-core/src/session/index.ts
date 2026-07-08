@@ -1,7 +1,14 @@
 import { homedir } from 'node:os';
 import { join } from 'pathe';
-import type { Kaos } from '@moonshot-ai/kaos';
+import {
+  IndexedKaos,
+  HermeticKaos,
+  IndexedSessionInitializer,
+  SymlinkAtomicCommitter,
+} from '@moonshot-ai/kaos';
+import type { Kaos, MerkleFileIndex, MerkleSnapshot } from '@moonshot-ai/kaos';
 import type { SessionWarning } from '@moonshot-ai/protocol';
+import { MutationLog, DeterministicReducer } from '#/agent/mutation-log';
 
 import { ErrorCodes, KimiError } from '#/errors';
 import { getRootLogger, log } from '#/logging/logger';
@@ -174,6 +181,11 @@ export class Session {
   };
   private writeMetadataPromise = Promise.resolve();
   private agentsMdWarning: string | undefined;
+  private _indexedKaos: IndexedKaos | undefined;
+  private _merkleIndex: MerkleFileIndex | undefined;
+  private _mutationLog: MutationLog | undefined;
+  private _sequenceCounter = 0;
+  private _baseSnapshot: MerkleSnapshot | undefined;
 
   constructor(public readonly options: SessionOptions) {
     // Attach the per-session log sink up front so the constructor's
@@ -222,8 +234,30 @@ export class Session {
     });
   }
 
+  async initialize(): Promise<void> {
+    const delegate = this.options.kaos;
+    const initializer = new IndexedSessionInitializer(delegate);
+    const state = await initializer.initialize();
+
+    this._merkleIndex = state.index;
+    this._indexedKaos = state.indexedKaos;
+    this._mutationLog = new MutationLog();
+    this._sequenceCounter = 0;
+
+    // Inject MutationLog into IndexedKaos — "memory address allocator" simulation
+    this._indexedKaos.setMutationLog(this._mutationLog, () => ++this._sequenceCounter);
+
+    // Take initial snapshot — "memory checkpoint"
+    this._baseSnapshot = state.index.branch();
+
+    // Swap toolKaos — propagates to ALL agents via existing setToolKaos mechanism
+    this.setToolKaos(this._indexedKaos);
+  }
+
 
   setToolKaos(kaos: Kaos) {
+    // Guard: once indexed mode is active, the IndexedKaos is the canonical toolKaos
+    if (this._indexedKaos !== undefined) return;
     this.toolKaos = kaos;
     for (const agent of this.readyAgents()) {
       agent.setKaos(kaos.withCwd(agent.config.cwd));
@@ -318,6 +352,7 @@ export class Session {
   }
 
   async createMain() {
+    await this.initialize();  // ← must complete before any tool use
     const profileKey = this.resolveProfileKey();
     const { agent } = await this.createAgent({ type: 'main' }, {
       profile: DEFAULT_AGENT_PROFILES[profileKey],
@@ -328,6 +363,7 @@ export class Session {
 
   async resume(): Promise<{ warning?: string }> {
     await this.skillsReady;
+    await this.initialize();
     this.log.info('session resume', { app_version: this.options.appVersion });
     const { agents } = await this.readMetadata();
     this.agents.clear();
@@ -705,11 +741,21 @@ export class Session {
     const parentAgent = parentAgentId !== null ? this.getReadyAgent(parentAgentId) : undefined;
     const cwd = parentAgent?.config.cwd ?? this.toolKaos.getcwd();
     const planDir = resolveKimiHome(this.options.kimiHomeDir);
+    // Factory-level kaos injection: subagents get HermeticKaos (sandboxed, exec blocked)
+    let agentKaos: Kaos;
+    if (type !== 'main' && this._merkleIndex && this._mutationLog) {
+      const hermetic = new HermeticKaos(this.toolKaos, this._merkleIndex, { allowProjection: true });
+      hermetic.setMutationLog(this._mutationLog, () => ++this._sequenceCounter);
+      hermetic.setAgentId(id);
+      agentKaos = hermetic;
+    } else {
+      agentKaos = this.toolKaos;
+    }
     return new Agent({
       ...config,
       type,
       sessionId: this.options.id,
-      kaos: this.toolKaos.withCwd(cwd),
+      kaos: agentKaos.withCwd(cwd),
       toolServices: this.options.toolServices,
       config: this.options.config,
       homedir,
@@ -839,6 +885,68 @@ export class Session {
       matcherValue: reason,
       inputData: { reason },
     });
+  }
+
+  /**
+   * Take a snapshot of the current index state — "memory checkpoint".
+   */
+  takeEpochSnapshot(): MerkleSnapshot | undefined {
+    return this._merkleIndex?.branch();
+  }
+
+  /**
+   * Commit the current epoch — "atomic pointer swap simulation".
+   * Linearizes mutations, resolves conflicts, commits via symlinks.
+   */
+  async commitEpoch(): Promise<void> {
+    if (!this._mutationLog || !this._merkleIndex || !this._baseSnapshot) return;
+
+    // 1. Linearize — "address sorting"
+    const linearized = this._mutationLog.linearize();
+
+    // 2. Detect & resolve conflicts — "collision resolution"
+    const reducer = new DeterministicReducer();
+    const conflicts = this._mutationLog.detectConflicts();
+    if (conflicts.length > 0) {
+      const resolved = reducer.resolveConflicts(conflicts);
+      reducer.reduce(resolved, this._merkleIndex, this._merkleIndex.getPool());
+    }
+
+    // 3. Atomic commit — "pointer swap simulation"
+    const committer = new SymlinkAtomicCommitter(this.persistenceKaos.getcwd());
+    await committer.init();
+    const generation = committer.stageFromSnapshot(
+      this._merkleIndex.branch(),
+      this._baseSnapshot,
+      this._merkleIndex.getPool(),
+    );
+    committer.commit(generation, this._merkleIndex);
+
+    // 4. Reset for next epoch — "new checkpoint"
+    this._mutationLog = new MutationLog();
+    this._sequenceCounter = 0;
+    this._baseSnapshot = this._merkleIndex.branch();
+
+    // 5. Re-inject fresh MutationLog into IndexedKaos
+    this._indexedKaos?.setMutationLog(this._mutationLog, () => ++this._sequenceCounter);
+  }
+
+  /**
+   * Rollback the current epoch — "checkpoint restore".
+   * Discards all mutations since the last snapshot.
+   */
+  rollbackEpoch(): void {
+    if (!this._merkleIndex || !this._baseSnapshot) return;
+
+    // Restore index from base snapshot — discard all mutations
+    this._merkleIndex.restoreFromSnapshot(this._baseSnapshot);
+
+    // Reset mutation log
+    this._mutationLog = new MutationLog();
+    this._sequenceCounter = 0;
+
+    // Re-inject fresh MutationLog
+    this._indexedKaos?.setMutationLog(this._mutationLog, () => ++this._sequenceCounter);
   }
 }
 

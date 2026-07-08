@@ -59,6 +59,8 @@ import type { ToolServices } from '../tools/support/services';
 export type { AgentRecord, AgentRecordPersistence } from './records';
 export type { SwarmModeTrigger } from './swarm';
 export type { BuiltinTool, ToolInfo, ToolSource, UserToolRegistration } from './tool';
+export { MutationLog, DeterministicReducer, ConflictResolution } from './mutation-log';
+export type { MutationOp, FileConflict } from './mutation-log';
 export * from './goal';
 
 export type AgentType = 'main' | 'sub' | 'independent';
