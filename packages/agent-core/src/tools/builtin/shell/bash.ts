@@ -206,6 +206,11 @@ export class BashTool implements BuiltinTool<BashInput> {
     const noninteractiveEnv: Record<string, string> = {
       NO_COLOR: '1',
       TERM: 'dumb',
+      // Force non-pager output for git and other tools. Without this, git
+      // may invoke `less` (via GIT_PAGER / PAGER from the ambient env) and
+      // block waiting for interactive input, which hangs the child process.
+      GIT_PAGER: 'cat',
+      PAGER: 'cat',
       // Default to '0' so git fails fast on private remotes if a TTY happens
       // to be inherited; honour an explicit ambient value when the user has
       // set one.

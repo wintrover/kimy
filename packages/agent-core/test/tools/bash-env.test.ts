@@ -71,6 +71,40 @@ describe('BashTool noninteractive env semantics', () => {
     }
   });
 
+  it('sets GIT_PAGER to "cat" to prevent interactive pager hang', async () => {
+    const previous = process.env['GIT_PAGER'];
+    delete process.env['GIT_PAGER'];
+    try {
+      const env = await captureSpawnEnv();
+      expect(env['GIT_PAGER']).toBe('cat');
+    } finally {
+      if (previous !== undefined) process.env['GIT_PAGER'] = previous;
+    }
+  });
+
+  it('sets PAGER to "cat" to prevent interactive pager hang', async () => {
+    const previous = process.env['PAGER'];
+    delete process.env['PAGER'];
+    try {
+      const env = await captureSpawnEnv();
+      expect(env['PAGER']).toBe('cat');
+    } finally {
+      if (previous !== undefined) process.env['PAGER'] = previous;
+    }
+  });
+
+  it('GIT_PAGER="cat" overrides an ambient GIT_PAGER value', async () => {
+    const previous = process.env['GIT_PAGER'];
+    process.env['GIT_PAGER'] = 'less';
+    try {
+      const env = await captureSpawnEnv();
+      expect(env['GIT_PAGER']).toBe('cat');
+    } finally {
+      if (previous === undefined) delete process.env['GIT_PAGER'];
+      else process.env['GIT_PAGER'] = previous;
+    }
+  });
+
   it('lets kaos-level env override BashTool env and observes in-place updates', async () => {
     const execWithEnv = vi.fn().mockResolvedValue(fakeProcess());
     const sessionEnv = {
