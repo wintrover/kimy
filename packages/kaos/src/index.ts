@@ -70,3 +70,5 @@ export { SymlinkAtomicCommitter, CommitStrategy } from './symlink-committer';
 export type { Generation } from './symlink-committer';
 export { GenerationGarbageCollector } from './generation-gc';
 export type { GCResult } from './generation-gc';
+export { VFSPathFactory, compareCanonicalPath } from './path';
+export type { CanonicalVFSPath } from './path';

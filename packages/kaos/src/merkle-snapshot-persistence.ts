@@ -9,6 +9,7 @@
  */
 
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
+import { compareCanonicalPath } from './path';
 import { dirname } from 'node:path';
 import type { FileEntry, MerkleSnapshot } from './merkle-file-index';
 
@@ -133,8 +134,8 @@ export async function saveSnapshotV2(
   const snapshot: PersistedSnapshotV2 = {
     version: SNAPSHOT_VERSION_V2,
     rootHash,
-    files: Array.from(files.entries()).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
-    directories: directories.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+    files: Array.from(files.entries()).sort(([a], [b]) => compareCanonicalPath(a, b)),
+    directories: directories.sort(([a], [b]) => compareCanonicalPath(a, b)),
     savedAt: Date.now(),
   };
 

@@ -195,9 +195,9 @@ describe('IndexedKaos', () => {
 describe('HermeticKaos', () => {
   it('reads from index', async () => {
     const index = MerkleFileIndex.empty();
-    index.writeFile('/file.txt', 'content');
+    index.writeFile('file.txt', 'content');
     const kaos = new HermeticKaos(mockDelegate, index);
-    expect(await kaos.readText('/file.txt')).toBe('content');
+    expect(await kaos.readText('file.txt')).toBe('content');
   });
 
   it('refreshes snapshot after write (CoW)', async () => {

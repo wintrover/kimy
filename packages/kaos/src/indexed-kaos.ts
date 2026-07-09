@@ -10,7 +10,8 @@
  * to an underlying `Kaos` instance (typically `LocalKaos`) so that path
  * semantics match the host OS without touching the filesystem for reads.
  */
-import * as nodePath from 'node:path';
+import { VFSPathFactory } from './path';
+import type { CanonicalVFSPath } from './path';
 
 import type { Kaos } from './kaos';
 import type { Environment } from './environment';
@@ -69,6 +70,7 @@ export class IndexedKaos implements Kaos {
   private _mutationLog: MutationRecorder | undefined;
   private _nextSequenceId: (() => number) | undefined;
   private _agentId = 'main';
+  private readonly _factory: VFSPathFactory;
 
   /**
    * @param delegate - Underlying Kaos used for path ops and env
@@ -89,6 +91,7 @@ export class IndexedKaos implements Kaos {
     this.osEnv = delegate.osEnv;
     this._mutationLog = mutationLog;
     this._nextSequenceId = nextSequenceId;
+    this._factory = new VFSPathFactory(index.rootDir);
   }
 
   // ── Path operations (delegated) ─────────────────────────────────
@@ -159,7 +162,7 @@ export class IndexedKaos implements Kaos {
     path: string,
     options?: { encoding?: BufferEncoding; errors?: 'strict' | 'replace' | 'ignore' },
   ): Promise<string> {
-    const content = this._index.getFileContent(this.normpath(path));
+    const content = this._index.getFileContent(this._factory.create(this.normpath(path)));
     if (content === undefined) throw new IndexMissError(path);
     return content;
   }
@@ -206,7 +209,7 @@ export class IndexedKaos implements Kaos {
    * @throws {IndexMissError} if the path is not present in the index.
    */
   async stat(path: string, options?: { followSymlinks?: boolean }): Promise<StatResult> {
-    const entry = this._index.getEntry(this.normpath(path));
+    const entry = this._index.getEntry(this._factory.create(this.normpath(path)));
     if (entry === undefined) throw new IndexMissError(path);
     return {
       stMode: 0o100644,
@@ -228,7 +231,7 @@ export class IndexedKaos implements Kaos {
    * @throws {IndexMissError} if `path` is not a known directory.
    */
   async *iterdir(path: string): AsyncGenerator<string> {
-    const children = this._index.listDir(this.normpath(path));
+    const children = this._index.listDir(this._factory.create(this.normpath(path)));
     if (children === undefined) throw new IndexMissError(path);
     for (const child of children) {
       yield child;
@@ -246,15 +249,8 @@ export class IndexedKaos implements Kaos {
     pattern: string,
     options?: { caseSensitive?: boolean },
   ): AsyncGenerator<string> {
-    const normalizedPath = this.normpath(path);
-    const rootDir = this._index.rootDir;
-
-    // Make the search path relative to the index root.
-    const relativeDir = nodePath.posix.relative(rootDir, normalizedPath);
-
-    // Combine: if relativeDir is '' use pattern as-is, otherwise prefix it.
+    const relativeDir = this._factory.create(this.normpath(path));
     const fullPattern = relativeDir === '' ? pattern : `${relativeDir}/${pattern}`;
-
     for await (const rel of this._index.glob(fullPattern)) {
       yield rel;
     }
@@ -272,7 +268,7 @@ export class IndexedKaos implements Kaos {
     data: string,
     options?: { mode?: 'w' | 'a'; encoding?: BufferEncoding },
   ): Promise<number> {
-    const normalized = this.normpath(path);
+    const normalized = this._factory.create(this.normpath(path));
     const mode = options?.mode ?? 'w';
     let content = data;
     if (mode === 'a') {
@@ -302,7 +298,7 @@ export class IndexedKaos implements Kaos {
    * @returns The number of bytes written.
    */
   async writeBytes(path: string, data: Buffer): Promise<number> {
-    const normalized = this.normpath(path);
+    const normalized = this._factory.create(this.normpath(path));
     this._index.writeFile(normalized, data);
 
     if (this._mutationLog && this._nextSequenceId) {
@@ -324,7 +320,7 @@ export class IndexedKaos implements Kaos {
    * @returns `true` if the file existed and was removed.
    */
   async deleteFile(path: string): Promise<boolean> {
-    const normalized = this.normpath(path);
+    const normalized = this._factory.create(this.normpath(path));
     const removed = this._index.deleteFile(normalized);
 
     if (this._mutationLog && this._nextSequenceId) {
@@ -361,7 +357,7 @@ export class IndexedKaos implements Kaos {
    * created as well.
    */
   async mkdir(path: string, options?: { parents?: boolean; existOk?: boolean }): Promise<void> {
-    this._index.ensureDir(this.normpath(path), { parents: options?.parents ?? true });
+    this._index.ensureDir(this._factory.create(this.normpath(path)), { parents: options?.parents ?? true });
   }
 
   async snapshot(_root: string, _options?: SnapshotOptions): Promise<ContentVector> {

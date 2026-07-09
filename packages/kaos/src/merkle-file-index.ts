@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { Kaos } from './kaos';
 import { ContentAddressedPool } from './object-pool';
 import type { ContentVector } from './types';
+import type { CanonicalVFSPath } from './path';
 
 // ── Public types ────────────────────────────────────────────────────
 
@@ -158,7 +159,7 @@ function sortedBytes(items: string[]): string[] {
  * strip a leading `./`.
  */
 function normalizeRelativePath(p: string): string {
-  return p.replaceAll('\\', '/').replace(/^\.\//, '');
+  return p.replaceAll('\\', '/').replace(/^\.\//, '').normalize('NFC');
 }
 
 function parentDir(relativePath: string): string {
@@ -330,7 +331,8 @@ export class MerkleFileIndex {
         contentHash = entry.contentHash;
       }
 
-      files.set(entry.relPath, {
+      const normalizedRelPath = entry.relPath.normalize('NFC');
+      files.set(normalizedRelPath, {
         contentHash,
         size: entry.size,
         mtime: entry.mtime,
@@ -378,7 +380,7 @@ export class MerkleFileIndex {
    * @param relativePath - Forward-slash–separated relative path.
    * @returns The file content as a UTF-8 string, or `undefined` if not found.
    */
-  getFile(relativePath: string): string | undefined {
+  getFile(relativePath: CanonicalVFSPath): string | undefined {
     const entry = this.files.get(relativePath);
     if (entry === undefined) return undefined;
     const buf = this.pool.get(entry.contentHash);
@@ -407,7 +409,7 @@ export class MerkleFileIndex {
    * @param relativePath - Path relative to the index root.
    * @returns The file content as a UTF-8 string, or `undefined` if not found.
    */
-  getFileContent(relativePath: string): string | undefined {
+  getFileContent(relativePath: CanonicalVFSPath): string | undefined {
     const normalizedPath = normalizeRelativePath(relativePath);
     const entry = this.files.get(normalizedPath);
     if (entry === undefined) return undefined;
@@ -422,7 +424,7 @@ export class MerkleFileIndex {
    * @param relativePath - Path relative to the index root.
    * @returns The {@link FileEntry}, or `undefined` if not found.
    */
-  getEntry(relativePath: string): FileEntry | undefined {
+  getEntry(relativePath: CanonicalVFSPath): FileEntry | undefined {
     return this.files.get(normalizeRelativePath(relativePath));
   }
 
@@ -433,7 +435,7 @@ export class MerkleFileIndex {
    * @returns An array of child basenames, or `undefined` if the directory
    *   is not tracked.
    */
-  listDir(dirPath: string): string[] | undefined {
+  listDir(dirPath: CanonicalVFSPath): string[] | undefined {
     const normalizedPath = normalizeRelativePath(dirPath);
     const node = this.dirs.get(normalizedPath);
     if (node === undefined) return undefined;
@@ -447,7 +449,7 @@ export class MerkleFileIndex {
    * @param options.parents - When `true` (the default for `IndexedKaos.mkdir`),
    *   also create all ancestor directories so the tree stays connected.
    */
-  ensureDir(dirPath: string, options?: { parents?: boolean }): void {
+  ensureDir(dirPath: CanonicalVFSPath, options?: { parents?: boolean }): void {
     const normalizedPath = normalizeRelativePath(dirPath);
 
     // Always ensure parent dirs exist so the tree stays connected.
@@ -473,7 +475,7 @@ export class MerkleFileIndex {
    * @param mtime        - Optional modification timestamp. Defaults to `Date.now() / 1000`.
    * @returns The new content hash for the file.
    */
-  writeFile(relativePath: string, content: Buffer | string, mtime?: number): string {
+  writeFile(relativePath: CanonicalVFSPath, content: Buffer | string, mtime?: number): string {
     const normalizedPath = normalizeRelativePath(relativePath);
     const ts = mtime ?? Date.now() / 1000;
     const contentBuf = typeof content === 'string' ? Buffer.from(content, 'utf-8') : content;
@@ -512,7 +514,7 @@ export class MerkleFileIndex {
    * @param relativePath - Path relative to the index root.
    * @returns `true` if the file existed and was removed.
    */
-  deleteFile(relativePath: string): boolean {
+  deleteFile(relativePath: CanonicalVFSPath): boolean {
     const normalizedPath = normalizeRelativePath(relativePath);
 
     const existed = this.files.delete(normalizedPath);

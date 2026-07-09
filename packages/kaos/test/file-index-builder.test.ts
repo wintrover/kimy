@@ -9,6 +9,8 @@ import {
   parseGitignoreContent,
   gitignorePatternToRegex,
 } from '#/file-index-builder';
+import { VFSPathFactory, compareCanonicalPath } from '#/path';
+import { HermeticKaos } from '#/hermetic-kaos';
 
 // Re-export the dependency classes so tests can instantiate them directly.
 import { ContentAddressedPool as Pool } from '#/object-pool';
@@ -559,5 +561,147 @@ describe('FileIndexBuilder', () => {
     expect(result.stats.filesIndexed).toBe(0);
     expect(result.index.files.size).toBe(0);
     expect(result.index.rootHash).toBe(EMPTY_DIR_HASH);
+  });
+});
+
+// ── VFSPathFactory ─────────────────────────────────────────────────
+
+describe('VFSPathFactory', () => {
+  it('converts absolute path to relative path', () => {
+    const factory = new VFSPathFactory('/home/user/project');
+    expect(factory.create('/home/user/project/src/foo.ts')).toBe('src/foo.ts');
+  });
+
+  it('returns empty string for rootDir itself', () => {
+    const factory = new VFSPathFactory('/home/user/project');
+    expect(factory.create('/home/user/project')).toBe('');
+  });
+
+  it('NFC/NFD normalization produces the same relative path', () => {
+    const koreanRoot = '/home/user/바탕화면/project';
+    const factory = new VFSPathFactory(koreanRoot);
+
+    const nfdPath = koreanRoot + '/src/한글파일.ts';
+    const nfcInput = nfdPath.normalize('NFC');
+    const nfdInput = nfdPath.normalize('NFD');
+
+    expect(factory.create(nfcInput)).toBe('src/한글파일.ts');
+    expect(factory.create(nfdInput)).toBe('src/한글파일.ts');
+    expect(factory.create(nfcInput)).toBe(factory.create(nfdInput));
+  });
+
+  it('converts backslashes to forward slashes', () => {
+    const factory = new VFSPathFactory('/home/user/project');
+    expect(factory.create('/home/user/project/src\\gate\\gateway.nim')).toBe('src/gate/gateway.nim');
+  });
+
+  it('resolves double slashes and ../ traversal', () => {
+    const factory = new VFSPathFactory('/home/user/project');
+    expect(factory.create('/home/user/project/src//gate/../core/vfs_hasher.nim')).toBe('src/core/vfs_hasher.nim');
+  });
+
+  it('normalizes trailing dot and slash-dot', () => {
+    const factory = new VFSPathFactory('/home/user/project');
+    expect(factory.create('/home/user/project/.')).toBe('');
+    expect(factory.create('/home/user/project/./src')).toBe('src');
+  });
+});
+
+// ── HermeticKaos with canonicalized paths ──────────────────────────
+
+describe('HermeticKaos with canonicalized paths', () => {
+  it('absolute path readText, stat, and iterdir succeed', async () => {
+    // Build a ContentVector with Korean-named paths
+    const rootDir = '/home/사용자/프로젝트';
+    const vector: FsEntry[] = [
+      {
+        relPath: 'src/한글파일.ts',
+        isDirectory: false,
+        isFile: true,
+        isSymbolicLink: false,
+        size: 13,
+        mtime: 1000,
+        contentHash: '',
+        content: Buffer.from('안녕하세요世界'),
+      },
+      {
+        relPath: 'test/테스트.ts',
+        isDirectory: false,
+        isFile: true,
+        isSymbolicLink: false,
+        size: 5,
+        mtime: 2000,
+        contentHash: '',
+        content: Buffer.from('hello'),
+      },
+    ];
+
+    const index = Index.buildFromVector(vector, rootDir);
+
+    // Build a minimal mock delegate for HermeticKaos
+    const delegate: Kaos = {
+      name: 'mock-delegate',
+      osEnv: undefined as unknown as Kaos['osEnv'],
+      pathClass: () => 'posix' as const,
+      normpath: (p: string) => p,
+      gethome: () => '/home/test',
+      getcwd: () => rootDir,
+      chdir: async () => {},
+      withCwd: () => delegate,
+      withEnv: () => delegate,
+      stat: async () => ({ stMode: 0o100644, stIno: 0, stDev: 0, stNlink: 1, stUid: 0, stGid: 0, stSize: 0, stAtime: 0, stMtime: 0, stCtime: 0 }),
+      iterdir: async function* () {},
+      glob: async function* () {},
+      snapshot: async () => [],
+      readBytes: async () => Buffer.alloc(0),
+      readText: async () => '',
+      readLines: async function* () {},
+      writeBytes: async () => 0,
+      writeText: async () => 0,
+      mkdir: async () => {},
+      exec: async () => { throw new Error('not implemented'); },
+      execWithEnv: async () => { throw new Error('not implemented'); },
+    };
+
+    const hermetic = new HermeticKaos(delegate, index);
+
+    // readText with absolute path should succeed
+    const content = await hermetic.readText(rootDir + '/src/한글파일.ts');
+    expect(content).toBe('안녕하세요世界');
+
+    // stat with absolute path should succeed
+    const entry = await hermetic.stat(rootDir + '/src/한글파일.ts');
+    expect(entry.stSize).toBe(13);
+
+    // iterdir with absolute root path should yield children
+    const children: string[] = [];
+    for await (const child of hermetic.iterdir(rootDir)) {
+      children.push(child);
+    }
+    expect(children.sort()).toEqual(['src', 'test']);
+  });
+});
+
+// ── compareCanonicalPath ───────────────────────────────────────────
+
+describe('compareCanonicalPath', () => {
+  it('sorts deterministically by UTF-8 byte order', () => {
+    const paths = ['바/a.txt', '한/b.txt', '가/c.txt'];
+
+    // JS default string sort uses codepoint order
+    const jsSorted = [...paths].sort();
+
+    // compareCanonicalPath uses Buffer.compare (UTF-8 byte order)
+    const byteSorted = [...paths].sort(compareCanonicalPath);
+
+    // For these Korean characters the byte order should be deterministic
+    // and produce a consistent result.
+    expect(byteSorted).toEqual([...paths].sort((a, b) =>
+      Buffer.compare(Buffer.from(a, 'utf-8'), Buffer.from(b, 'utf-8')),
+    ));
+
+    // Verify stability: sorting twice yields the same order
+    const secondPass = [...byteSorted].sort(compareCanonicalPath);
+    expect(secondPass).toEqual(byteSorted);
   });
 });

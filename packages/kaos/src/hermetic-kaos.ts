@@ -18,6 +18,8 @@ import { MerkleFileIndex } from './merkle-file-index';
 import type { MerkleSnapshot } from './merkle-file-index';
 import { KaosSandboxError } from './errors';
 import { SnapshotProjector, buildSandboxEnv } from './snapshot-projector';
+import { VFSPathFactory } from './path';
+import type { CanonicalVFSPath } from './path';
 
 // Simple async mutex for serializing exec calls within a single HermeticKaos instance.
 class _Mutex {
@@ -81,6 +83,7 @@ export class HermeticKaos implements Kaos {
 
   private readonly _allowProjection: boolean;
   private _execMutex: _Mutex | undefined;
+  private readonly _factory: VFSPathFactory;
 
   /**
    * @param delegate - Underlying Kaos used for path ops and env
@@ -95,6 +98,7 @@ export class HermeticKaos implements Kaos {
     this.osEnv = delegate.osEnv;
     this._snapshot = index.branch();
     this._allowProjection = options?.allowProjection ?? false;
+    this._factory = new VFSPathFactory(index.rootDir);
   }
 
   // ── Path operations (delegated) ─────────────────────────────────
@@ -161,7 +165,7 @@ export class HermeticKaos implements Kaos {
     path: string,
     options?: { encoding?: BufferEncoding; errors?: 'strict' | 'replace' | 'ignore' },
   ): Promise<string> {
-    const content = this._index.getFileContent(this.normpath(path));
+    const content = this._index.getFileContent(this._factory.create(this.normpath(path)));
     if (content === undefined) {
       throw new KaosSandboxError(`File not found in hermetic index: ${path}`);
     }
@@ -209,7 +213,7 @@ export class HermeticKaos implements Kaos {
    * @throws {KaosSandboxError} if the path is not present in the index.
    */
   async stat(path: string, options?: { followSymlinks?: boolean }): Promise<StatResult> {
-    const entry = this._index.getEntry(this.normpath(path));
+    const entry = this._index.getEntry(this._factory.create(this.normpath(path)));
     if (entry === undefined) {
       throw new KaosSandboxError(`File not found in hermetic index: ${path}`);
     }
@@ -233,7 +237,7 @@ export class HermeticKaos implements Kaos {
    * @throws {KaosSandboxError} if `path` is not a known directory.
    */
   async *iterdir(path: string): AsyncGenerator<string> {
-    const children = this._index.listDir(this.normpath(path));
+    const children = this._index.listDir(this._factory.create(this.normpath(path)));
     if (children === undefined) {
       throw new KaosSandboxError(`Directory not found in hermetic index: ${path}`);
     }
@@ -253,25 +257,8 @@ export class HermeticKaos implements Kaos {
     pattern: string,
     options?: { caseSensitive?: boolean },
   ): AsyncGenerator<string> {
-    const normalizedPath = this.normpath(path);
-    const rootDir = this._index.rootDir;
-
-    // Make the search path relative to the index root.
-    let relativeDir: string;
-    if (rootDir === '') {
-      relativeDir = '';
-    } else {
-      // Simple prefix-based relative path computation.
-      relativeDir = normalizedPath.startsWith(rootDir + '/')
-        ? normalizedPath.slice(rootDir.length + 1)
-        : normalizedPath === rootDir
-          ? ''
-          : normalizedPath;
-    }
-
-    // Combine: if relativeDir is '' use pattern as-is, otherwise prefix it.
+    const relativeDir = this._factory.create(this.normpath(path));
     const fullPattern = relativeDir === '' ? pattern : `${relativeDir}/${pattern}`;
-
     for await (const rel of this._index.glob(fullPattern)) {
       yield rel;
     }
@@ -290,7 +277,7 @@ export class HermeticKaos implements Kaos {
     data: string,
     options?: { mode?: 'w' | 'a'; encoding?: BufferEncoding },
   ): Promise<number> {
-    const normalized = this.normpath(path);
+    const normalized = this._factory.create(this.normpath(path));
     const mode = options?.mode ?? 'w';
     let content = data;
     if (mode === 'a') {
@@ -315,7 +302,7 @@ export class HermeticKaos implements Kaos {
    * @returns The number of bytes written.
    */
   async writeBytes(path: string, data: Buffer): Promise<number> {
-    const normalized = this.normpath(path);
+    const normalized = this._factory.create(this.normpath(path));
     this._index.writeFile(normalized, data);
     this._mutationLog?.record({
       type: 'write',
@@ -333,7 +320,7 @@ export class HermeticKaos implements Kaos {
    * snapshot.
    */
   async mkdir(path: string, options?: { parents?: boolean; existOk?: boolean }): Promise<void> {
-    this._index.ensureDir(this.normpath(path), { parents: options?.parents ?? true });
+    this._index.ensureDir(this._factory.create(this.normpath(path)), { parents: options?.parents ?? true });
     this._snapshot = this._index.branch();
   }
 
@@ -388,7 +375,7 @@ export class HermeticKaos implements Kaos {
             type: change.type === 'deleted' ? 'delete' : 'write',
             path: change.path,
             content: change.type !== 'deleted'
-              ? this._index.getFileContent(change.path)
+              ? this._index.getFileContent(change.path as CanonicalVFSPath)
               : undefined,
             staticSequenceId: this._nextSequenceId?.() ?? 0,
             agentId: this._agentId,
